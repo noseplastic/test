@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>발로 코치 오버레이</title>
+  <link rel="stylesheet" href="css/coach.css" />
+  <style>
+    html, body { margin: 0; background: transparent; overflow: hidden; }
+    body.browser { background: #0f1419; padding: 12px; }
+    #root { display: inline-block; transform-origin: top left; }
+    body.move .coach-card { outline: 2px dashed #ff4655; cursor: move; -webkit-app-region: drag; }
+    body.move #moveHint { display: block; }
+    #moveHint { display: none; margin-top: 4px; padding: 4px 8px; width: 320px; box-sizing: border-box; border-radius: 6px;
+      background: #ff4655; color: #fff; font: 12px system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="moveHint">드래그해서 옮기고 Ctrl+Shift+L 로 고정</div>
+  <script type="module" src="js/overlay.js"></script>
+</body>
+</html>

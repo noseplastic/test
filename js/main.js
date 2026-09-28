@@ -3,6 +3,7 @@ import { SCENARIOS } from './scenarios.js';
 import { WEAPONS, DIFFICULTY, GAME_YAW } from './config.js';
 import { STRAFE_PROFILES, STRAFE_STOPS } from './bots.js';
 import { cm360, edpi, degPerCount, convertSens, sensFromCm360, describeEdpi, roundSens } from './sens.js';
+import { buildCoachCard } from './coach.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -23,6 +24,7 @@ const store = {
 
 const settings = { ...DEFAULT_SETTINGS, ...store.get('vat.settings', {}) };
 let history = store.get('vat.history', []);
+let coachSessions = store.get('vat.coachSessions', []);
 let currentMode = null;
 let wantResume = false;
 let lastResult = null;
@@ -148,6 +150,14 @@ function saveSettings() {
   game.sfx.volume = settings.volume;
   applyCrosshair();
   renderSensStats();
+  pushCoach();
+}
+
+// 오버레이 코치 카드 갱신 (데스크톱 앱: 오버레이 창, 브라우저: overlay.html 탭)
+function pushCoach() {
+  const card = buildCoachCard({ settings, history, sessions: coachSessions });
+  store.set('vat.coachCard', card);
+  window.vatDesktop?.pushCoach(card);
 }
 
 function applyCrosshair() {
@@ -229,12 +239,16 @@ function initMenu() {
   $('resMenu').addEventListener('click', toMenu);
   $('clearHistory').addEventListener('click', () => {
     history = [];
+    coachSessions = [];
     store.set('vat.history', history);
+    store.set('vat.coachSessions', coachSessions);
     renderHistory();
+    pushCoach();
   });
 
   applyCrosshair();
   renderSensStats();
+  pushCoach();
 }
 
 function renderSensStats() {
@@ -371,6 +385,10 @@ function showResult(res) {
   });
   history = history.slice(0, 100);
   store.set('vat.history', history);
+  coachSessions.unshift({ modeName: res.modeName, date: res.date, advice: res.advice.map(({ level, title, key }) => ({ level, title, key })) });
+  coachSessions = coachSessions.slice(0, 5);
+  store.set('vat.coachSessions', coachSessions);
+  pushCoach();
 
   show('results');
 }

@@ -1,0 +1,23 @@
+/* 코치 카드 (오버레이 창 + 트레이너 미리보기) */
+.coach-card {
+  --cc-bg: rgba(12, 16, 22, var(--cc-alpha, 0.82));
+  width: 320px; padding: 12px 14px; border-radius: 10px; background: var(--cc-bg);
+  border: 1px solid #ffffff1f; border-left: 3px solid #ff4655; color: #ece8e1;
+  font: 13px/1.4 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  text-shadow: 0 1px 2px #000a;
+}
+.cc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cc-head b { font-size: 12px; letter-spacing: 1.5px; color: #ff4655; }
+.cc-sens { font-variant-numeric: tabular-nums; color: #c9ccd2; font-size: 12px; }
+.cc-rec { margin-top: 6px; padding: 4px 8px; border-radius: 5px; background: #ffc85722; color: #ffc857; font-size: 12px; }
+.cc-sec { margin: 10px 0 4px; font-size: 11px; color: #8b97a8; letter-spacing: 0.5px; }
+.cc-focus { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.cc-focus li { padding: 4px 8px; border-left: 3px solid #ffc857; background: #ffffff0a; border-radius: 4px; }
+.cc-focus li.bad { border-color: #ff5a5f; }
+.cc-focus li b { display: block; font-size: 14px; }
+.cc-focus li small { color: #8b97a8; font-size: 11px; }
+.cc-tip { font-size: 14px; font-weight: 600; }
+.cc-empty { color: #8b97a8; font-size: 12px; }
+.cc-foot { margin-top: 10px; display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: #8b97a8; }
+.cc-foot .ok { color: #3ddc97; }
+.cc-foot .todo { color: #ffc857; }

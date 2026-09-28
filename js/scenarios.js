@@ -524,7 +524,7 @@ export class HoldScenario extends Scenario {
     }
     const res = this.baseResult({ byType });
     if (this.wastedShots >= 3) {
-      res.advice.push({ level: 'warn', title: `미끼 사격 ${this.wastedShots}발`, text: '적이 제대로 나오기 전(숄더 피크)이나 보이지 않을 때 쏜 총알이 많아요. 숄더 피크에는 반응만 하고, 몸이 확실히 나올 때 쏘세요.' });
+      res.advice.push({ level: 'warn', title: `미끼 사격 ${this.wastedShots}발`, text: '적이 제대로 나오기 전(숄더 피크)이나 보이지 않을 때 쏜 총알이 많아요. 숄더 피크에는 반응만 하고, 몸이 확실히 나올 때 쏘세요.', key: 'bait' });
     }
     return res;
   }

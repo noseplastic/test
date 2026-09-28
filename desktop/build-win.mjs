@@ -8,6 +8,7 @@ const ELECTRON_VERSION = '33.2.1';
 
 await mkdir('desktop/app', { recursive: true });
 await copyFile('dist/valo-aim-trainer.html', 'desktop/app/index.html');
+await copyFile('dist/overlay.html', 'desktop/app/overlay.html');
 await rm('desktop/out', { recursive: true, force: true });
 
 const [outDir] = await packager({

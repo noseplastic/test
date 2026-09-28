@@ -181,7 +181,7 @@ const ok = (x) => Number.isFinite(x);
  */
 export function buildAdvice(stats, ctx = {}) {
   const out = [];
-  const add = (level, title, text) => out.push({ level, title, text });
+  const add = (level, title, text, key) => out.push({ level, title, text, key });
 
   if (stats.shots === 0) {
     add('warn', '사격 기록 없음', '한 발도 쏘지 않았어요. 좌클릭으로 사격합니다.');
@@ -191,22 +191,22 @@ export function buildAdvice(stats, ctx = {}) {
   // 반응 속도
   if (ok(stats.reactionMs) && stats.reactionSamples >= 3 && ctx.mode !== 'flick') {
     const r = stats.reactionMs;
-    if (r < 220) add('good', `반응 속도 ${Math.round(r)}ms`, '매우 빠른 반응입니다. 이제 첫 발 정확도(헤드)를 유지하는 데 집중하세요.');
-    else if (r < 300) add('good', `반응 속도 ${Math.round(r)}ms`, '평균 이상의 반응 속도입니다.');
+    if (r < 220) add('good', `반응 속도 ${Math.round(r)}ms`, '매우 빠른 반응입니다. 이제 첫 발 정확도(헤드)를 유지하는 데 집중하세요.', 'reaction');
+    else if (r < 300) add('good', `반응 속도 ${Math.round(r)}ms`, '평균 이상의 반응 속도입니다.', 'reaction');
     else add('warn', `반응 속도 ${Math.round(r)}ms`,
-      '적이 보이고 첫 발까지 오래 걸립니다. 크로스헤어를 적이 나올 자리에 미리 두면 "조준 이동" 없이 반응만으로 쏠 수 있어 체감 반응 속도가 크게 줄어요.');
+      '적이 보이고 첫 발까지 오래 걸립니다. 크로스헤어를 적이 나올 자리에 미리 두면 "조준 이동" 없이 반응만으로 쏠 수 있어 체감 반응 속도가 크게 줄어요.', 'reaction');
   }
 
   // 크로스헤어 배치 (높이)
   if (ok(stats.placementPitch) && stats.placementSamples >= 3) {
     if (stats.placementLowRate > 0.35) {
       add('bad', `크로스헤어가 낮음 (${pct(stats.placementLowRate)})`,
-        `적이 나타날 때 크로스헤어가 머리보다 평균 ${stats.placementPitch.toFixed(1)}° 아래에 있었어요. 평지에서는 크로스헤어를 수평선(머리 높이)에 두고, 이동할 때도 바닥을 보지 마세요.`);
+        `적이 나타날 때 크로스헤어가 머리보다 평균 ${stats.placementPitch.toFixed(1)}° 아래에 있었어요. 평지에서는 크로스헤어를 수평선(머리 높이)에 두고, 이동할 때도 바닥을 보지 마세요.`, 'placement-low');
     } else if (stats.placementHighRate > 0.35) {
       add('warn', `크로스헤어가 높음 (${pct(stats.placementHighRate)})`,
-        '머리보다 위에 두고 있는 경우가 많아요. 아래로 내리는 플릭은 오버슈팅이 잘 나니 머리 높이에 딱 맞추세요.');
+        '머리보다 위에 두고 있는 경우가 많아요. 아래로 내리는 플릭은 오버슈팅이 잘 나니 머리 높이에 딱 맞추세요.', 'placement-high');
     } else if (stats.placementPitch < 1.0) {
-      add('good', '헤드 높이 유지 좋음', `적이 나타날 때 상하 오차 중앙값 ${stats.placementPitch.toFixed(2)}°. 크로스헤어 높이는 잘 유지하고 있어요.`);
+      add('good', '헤드 높이 유지 좋음', `적이 나타날 때 상하 오차 중앙값 ${stats.placementPitch.toFixed(2)}°. 크로스헤어 높이는 잘 유지하고 있어요.`, 'placement-low');
     }
   }
   if (ok(stats.placementYaw) && stats.placementSamples >= 3 && (ctx.mode === 'hold' || ctx.mode === 'peek')) {
@@ -214,9 +214,9 @@ export function buildAdvice(stats, ctx = {}) {
       add('warn', `좌우 프리에임 오차 ${stats.placementYaw.toFixed(1)}°`,
         ctx.mode === 'hold'
           ? '앵글을 잡을 때 크로스헤어를 벽 모서리(적이 처음 보일 위치) 바로 옆에 붙이세요. 모서리에서 멀수록 적이 먼저 쏠 시간이 생깁니다.'
-          : '피킹 전에 적이 있을 만한 자리로 크로스헤어를 먼저 옮기고(프리에임) 나가세요. 나가면서 조준을 옮기면 늦습니다.');
+          : '피킹 전에 적이 있을 만한 자리로 크로스헤어를 먼저 옮기고(프리에임) 나가세요. 나가면서 조준을 옮기면 늦습니다.', 'preaim');
     } else {
-      add('good', `프리에임 좋음 (좌우 ${stats.placementYaw.toFixed(1)}°)`, '적이 나타나는 위치를 잘 예측하고 있어요.');
+      add('good', `프리에임 좋음 (좌우 ${stats.placementYaw.toFixed(1)}°)`, '적이 나타나는 위치를 잘 예측하고 있어요.', 'preaim');
     }
   }
 
@@ -224,11 +224,11 @@ export function buildAdvice(stats, ctx = {}) {
   if (ok(stats.movingShotRate)) {
     if (stats.movingShotRate > 0.2) {
       add('bad', `이동 중 사격 ${pct(stats.movingShotRate)}`,
-        '속도가 최고 속도의 30%를 넘은 상태에서 쏜 총알은 크게 튑니다. 반대 방향 키를 짧게 눌러(카운터 스트레이프) 멈춘 뒤 쏘세요. HUD의 속도 표시가 초록색일 때가 정확한 상태입니다.');
+        '속도가 최고 속도의 30%를 넘은 상태에서 쏜 총알은 크게 튑니다. 반대 방향 키를 짧게 눌러(카운터 스트레이프) 멈춘 뒤 쏘세요. HUD의 속도 표시가 초록색일 때가 정확한 상태입니다.', 'moving-shot');
     } else if (stats.movingShotRate > 0.05) {
-      add('warn', `이동 중 사격 ${pct(stats.movingShotRate)}`, '가끔 멈추기 전에 쏘고 있어요. 이동 키를 떼는 것과 클릭 타이밍을 분리해서 연습하세요.');
+      add('warn', `이동 중 사격 ${pct(stats.movingShotRate)}`, '가끔 멈추기 전에 쏘고 있어요. 이동 키를 떼는 것과 클릭 타이밍을 분리해서 연습하세요.', 'moving-shot');
     } else if (ctx.mode === 'peek' || ctx.mode === 'strafe') {
-      add('good', '멈춰서 쏘기 좋음', '거의 모든 사격이 정확도 구간(정지 상태)에서 나갔어요.');
+      add('good', '멈춰서 쏘기 좋음', '거의 모든 사격이 정확도 구간(정지 상태)에서 나갔어요.', 'moving-shot');
     }
   }
 
@@ -236,11 +236,11 @@ export function buildAdvice(stats, ctx = {}) {
   if (ok(stats.stopMs) && stats.stopSamples >= 5) {
     if (stats.counterRate < 0.5 && stats.stopMs > 80) {
       add('warn', `멈춤 ${Math.round(stats.stopMs)}ms · 카운터 스트레이프 ${pct(stats.counterRate)}`,
-        '대부분 이동 키를 떼기만 해서 멈추고 있어요. 발로란트는 키를 떼면 약 110ms 뒤에야 정확해지지만, 반대 키를 짧게 누르면 약 55ms 만에 정확해집니다. D를 떼는 순간 A를 톡 누르세요.');
+        '대부분 이동 키를 떼기만 해서 멈추고 있어요. 발로란트는 키를 떼면 약 110ms 뒤에야 정확해지지만, 반대 키를 짧게 누르면 약 55ms 만에 정확해집니다. D를 떼는 순간 A를 톡 누르세요.', 'counter-strafe');
     } else if (stats.stopMs <= 75) {
-      add('good', `멈춤 ${Math.round(stats.stopMs)}ms`, `풀 속도에서 정확 구간까지 빠르게 멈추고 있어요 (카운터 스트레이프 ${pct(stats.counterRate)}).`);
+      add('good', `멈춤 ${Math.round(stats.stopMs)}ms`, `풀 속도에서 정확 구간까지 빠르게 멈추고 있어요 (카운터 스트레이프 ${pct(stats.counterRate)}).`, 'counter-strafe');
     } else {
-      add('warn', `멈춤 ${Math.round(stats.stopMs)}ms`, '반대 키는 누르지만 너무 늦게/짧게 누르고 있어요. 이동 키를 떼는 것과 반대 키를 누르는 것을 거의 동시에 하세요. HUD 그래프에서 초록선이 가로선 아래로 빨리 내려갈수록 좋습니다.');
+      add('warn', `멈춤 ${Math.round(stats.stopMs)}ms`, '반대 키는 누르지만 너무 늦게/짧게 누르고 있어요. 이동 키를 떼는 것과 반대 키를 누르는 것을 거의 동시에 하세요. HUD 그래프에서 초록선이 가로선 아래로 빨리 내려갈수록 좋습니다.', 'counter-strafe');
     }
   }
 
@@ -249,25 +249,25 @@ export function buildAdvice(stats, ctx = {}) {
     if (stats.overshootRate > 0.35 && stats.overshootRate > stats.undershootRate) {
       add('warn', `오버슈팅 ${pct(stats.overshootRate)}`,
         '타겟을 지나쳤다가 되돌아오는 경우가 많아요. 감도가 높거나 플릭 끝에서 손목을 세우지 못하는 것입니다.' +
-        (ctx.edpi > 350 ? ` 현재 eDPI ${Math.round(ctx.edpi)}는 높은 편이니 5~10% 낮춰보세요.` : ' 플릭을 "빠르게 가서 멈춘다"보다 "타겟에서 멈춘다"에 집중하세요.'));
+        (ctx.edpi > 350 ? ` 현재 eDPI ${Math.round(ctx.edpi)}는 높은 편이니 5~10% 낮춰보세요.` : ' 플릭을 "빠르게 가서 멈춘다"보다 "타겟에서 멈춘다"에 집중하세요.'), 'overshoot');
     } else if (stats.undershootRate > 0.45 && stats.undershootRate > stats.overshootRate) {
       add('warn', `언더슈팅 ${pct(stats.undershootRate)}`,
         '첫 움직임이 타겟에 못 미쳐 두 번에 나눠 조준하고 있어요. 감도가 낮거나 팔 움직임이 부족한 것입니다.' +
-        (ctx.edpi < 220 ? ` 현재 eDPI ${Math.round(ctx.edpi)}는 낮은 편이니 5~10% 올려보세요.` : ' 플릭 거리를 과감하게 가져가세요.'));
+        (ctx.edpi < 220 ? ` 현재 eDPI ${Math.round(ctx.edpi)}는 낮은 편이니 5~10% 올려보세요.` : ' 플릭 거리를 과감하게 가져가세요.'), 'undershoot');
     } else {
-      add('good', '플릭 거리 감각 좋음', `오버슈팅 ${pct(stats.overshootRate)} / 언더슈팅 ${pct(stats.undershootRate)}. 감도와 플릭 거리가 잘 맞아요.`);
+      add('good', '플릭 거리 감각 좋음', `오버슈팅 ${pct(stats.overshootRate)} / 언더슈팅 ${pct(stats.undershootRate)}. 감도와 플릭 거리가 잘 맞아요.`, 'overshoot');
     }
     if (ok(stats.avgCorrections) && stats.avgCorrections > 1.5) {
-      add('warn', `미세 보정 평균 ${stats.avgCorrections.toFixed(1)}회`, '플릭 후 여러 번 나눠서 조정하고 있어요. 한 번에 멈추는 정확도를 높이면 TTK가 줄어듭니다.');
+      add('warn', `미세 보정 평균 ${stats.avgCorrections.toFixed(1)}회`, '플릭 후 여러 번 나눠서 조정하고 있어요. 한 번에 멈추는 정확도를 높이면 TTK가 줄어듭니다.', 'corrections');
     }
   }
 
   // 트래킹: 뒤처짐 / 앞서감
   if (ok(stats.lagRate)) {
     if (stats.lagRate > 0.65) {
-      add('warn', `트래킹 뒤처짐 ${pct(stats.lagRate)}`, '빗나간 샷 대부분이 적이 움직이는 방향의 뒤쪽이에요. 적의 이동 방향으로 크로스헤어를 살짝 먼저 두고, 적이 방향을 바꿔 멈추는 순간(카운터 스트레이프)을 노려 쏘세요.');
+      add('warn', `트래킹 뒤처짐 ${pct(stats.lagRate)}`, '빗나간 샷 대부분이 적이 움직이는 방향의 뒤쪽이에요. 적의 이동 방향으로 크로스헤어를 살짝 먼저 두고, 적이 방향을 바꿔 멈추는 순간(카운터 스트레이프)을 노려 쏘세요.', 'tracking-lag');
     } else if (stats.leadRate > 0.65) {
-      add('warn', `트래킹 앞서감 ${pct(stats.leadRate)}`, '적이 가는 방향보다 앞을 쏘고 있어요. ADAD는 방향 전환이 잦아서 예측을 너무 크게 하면 빗나갑니다. 적의 머리를 따라가는 데 집중하세요.');
+      add('warn', `트래킹 앞서감 ${pct(stats.leadRate)}`, '적이 가는 방향보다 앞을 쏘고 있어요. ADAD는 방향 전환이 잦아서 예측을 너무 크게 하면 빗나갑니다. 적의 머리를 따라가는 데 집중하세요.', 'tracking-lead');
     }
   }
 
@@ -277,33 +277,33 @@ export function buildAdvice(stats, ctx = {}) {
     const share = stats.stoppedShots / (stats.stoppedShots + stats.movingTargetShots);
     if (gap > 0.15 && share < 0.5) {
       add('warn', `멈춘 봇 명중 ${pct(stats.accStopped)} vs 움직이는 봇 ${pct(stats.accMoving)}`,
-        `상대가 카운터 스트레이프로 멈추는 순간 명중률이 훨씬 높은데, 샷의 ${pct(1 - share)}를 움직이는 중에 쐈어요. 상대가 멈추는 순간은 상대도 정확해지는 순간이니, 그 타이밍에 나도 멈춰서 먼저 쏘는 연습을 하세요.`);
+        `상대가 카운터 스트레이프로 멈추는 순간 명중률이 훨씬 높은데, 샷의 ${pct(1 - share)}를 움직이는 중에 쐈어요. 상대가 멈추는 순간은 상대도 정확해지는 순간이니, 그 타이밍에 나도 멈춰서 먼저 쏘는 연습을 하세요.`, 'stop-timing');
     } else if (gap > 0.15) {
-      add('good', '멈추는 타이밍 공략 좋음', `멈춘 봇 명중률 ${pct(stats.accStopped)}. 상대의 카운터 스트레이프 타이밍을 잘 노리고 있어요.`);
+      add('good', '멈추는 타이밍 공략 좋음', `멈춘 봇 명중률 ${pct(stats.accStopped)}. 상대의 카운터 스트레이프 타이밍을 잘 노리고 있어요.`, 'stop-timing');
     }
   }
   if (ctx.mode === 'strafe' && ctx.duel && stats.kills + stats.deaths >= 5) {
     const lose = stats.deaths / (stats.kills + stats.deaths);
     if (lose > 0.35) {
       add('bad', `듀얼 패배율 ${pct(lose)}`,
-        '봇이 멈춘 뒤 반응 속도 안에 먼저 맞히지 못했어요. 봇의 머리를 따라가다가(트래킹) 봇이 멈추는 순간 나도 반대 키로 카운터 스트레이프 → 바로 1~2발 탭. 계속 움직이면서 쏘면 탄이 튀어 이길 수 없어요.');
+        '봇이 멈춘 뒤 반응 속도 안에 먼저 맞히지 못했어요. 봇의 머리를 따라가다가(트래킹) 봇이 멈추는 순간 나도 반대 키로 카운터 스트레이프 → 바로 1~2발 탭. 계속 움직이면서 쏘면 탄이 튀어 이길 수 없어요.', 'duel');
     } else {
-      add('good', `듀얼 승률 ${pct(1 - lose)}`, '멈춰 쏘는 상대보다 먼저 맞히고 있어요. 적 반응 속도를 한 단계 올려보세요.');
+      add('good', `듀얼 승률 ${pct(1 - lose)}`, '멈춰 쏘는 상대보다 먼저 맞히고 있어요. 적 반응 속도를 한 단계 올려보세요.', 'duel');
     }
   }
 
   // 헤드 비율 / 낮은 조준
   if (ok(stats.headshotRate) && stats.hits >= 5) {
     if (stats.headshotRate < 0.35) {
-      add('bad', `헤드샷 비율 ${pct(stats.headshotRate)}`, '맞힌 샷 대부분이 몸/다리입니다. 발로란트는 Vandal 헤드 1발 킬이라 몸샷 여러 발보다 헤드 1발이 빠릅니다. 크로스헤어 높이부터 교정하세요.');
+      add('bad', `헤드샷 비율 ${pct(stats.headshotRate)}`, '맞힌 샷 대부분이 몸/다리입니다. 발로란트는 Vandal 헤드 1발 킬이라 몸샷 여러 발보다 헤드 1발이 빠릅니다. 크로스헤어 높이부터 교정하세요.', 'headshot');
     } else if (stats.headshotRate >= 0.6) {
-      add('good', `헤드샷 비율 ${pct(stats.headshotRate)}`, '헤드 조준이 좋습니다.');
+      add('good', `헤드샷 비율 ${pct(stats.headshotRate)}`, '헤드 조준이 좋습니다.', 'headshot');
     }
   }
 
   // 연사
   if (ok(stats.sprayShotRate) && stats.sprayShotRate > 0.3) {
-    add('warn', `연사 비율 ${pct(stats.sprayShotRate)}`, '4발째 이후 연사가 많아요. 중·원거리에서는 1~2발 탭/버스트 후 다시 조준하는 편이 정확합니다.');
+    add('warn', `연사 비율 ${pct(stats.sprayShotRate)}`, '4발째 이후 연사가 많아요. 중·원거리에서는 1~2발 탭/버스트 후 다시 조준하는 편이 정확합니다.', 'spray');
   }
 
   // 피킹/앵글 결과
@@ -312,14 +312,14 @@ export function buildAdvice(stats, ctx = {}) {
     if (dr > 0.4) {
       add('bad', `교전 패배율 ${pct(dr)}`, ctx.mode === 'peek'
         ? '적이 먼저 쏘는 경우가 많아요. 피킹은 "프리에임 → 짧게 나가서 → 카운터 스트레이프 → 1발"의 리듬입니다. 너무 넓게 나가면 한꺼번에 여러 각도에 노출돼요.'
-        : '적이 먼저 쏘는 경우가 많아요. 크로스헤어를 모서리에 붙이고, 적이 멈추는 순간이 아니라 보이는 순간 쏘세요.');
+        : '적이 먼저 쏘는 경우가 많아요. 크로스헤어를 모서리에 붙이고, 적이 멈추는 순간이 아니라 보이는 순간 쏘세요.', 'peek-loss');
     }
   }
 
   // 감도 자체
   if (ok(ctx.edpi)) {
-    if (ctx.edpi > 550) add('warn', `eDPI ${Math.round(ctx.edpi)}`, '발로란트 기준 매우 높은 감도입니다. 감도 찾기 모드로 낮은 구간을 테스트해보세요.');
-    else if (ctx.edpi < 150) add('warn', `eDPI ${Math.round(ctx.edpi)}`, '매우 낮은 감도입니다. 근접 교전·뒤돌기가 느리다면 감도 찾기 모드로 높은 구간을 테스트해보세요.');
+    if (ctx.edpi > 550) add('warn', `eDPI ${Math.round(ctx.edpi)}`, '발로란트 기준 매우 높은 감도입니다. 감도 찾기 모드로 낮은 구간을 테스트해보세요.', 'edpi-high');
+    else if (ctx.edpi < 150) add('warn', `eDPI ${Math.round(ctx.edpi)}`, '매우 낮은 감도입니다. 근접 교전·뒤돌기가 느리다면 감도 찾기 모드로 높은 구간을 테스트해보세요.', 'edpi-low');
   }
 
   return out;

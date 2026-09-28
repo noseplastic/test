@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>발로 코치 오버레이</title>
+  <style>
+/* 코치 카드 (오버레이 창 + 트레이너 미리보기) */
+.coach-card {
+  --cc-bg: rgba(12, 16, 22, var(--cc-alpha, 0.82));
+  width: 320px; padding: 12px 14px; border-radius: 10px; background: var(--cc-bg);
+  border: 1px solid #ffffff1f; border-left: 3px solid #ff4655; color: #ece8e1;
+  font: 13px/1.4 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  text-shadow: 0 1px 2px #000a;
+}
+.cc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cc-head b { font-size: 12px; letter-spacing: 1.5px; color: #ff4655; }
+.cc-sens { font-variant-numeric: tabular-nums; color: #c9ccd2; font-size: 12px; }
+.cc-rec { margin-top: 6px; padding: 4px 8px; border-radius: 5px; background: #ffc85722; color: #ffc857; font-size: 12px; }
+.cc-sec { margin: 10px 0 4px; font-size: 11px; color: #8b97a8; letter-spacing: 0.5px; }
+.cc-focus { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.cc-focus li { padding: 4px 8px; border-left: 3px solid #ffc857; background: #ffffff0a; border-radius: 4px; }
+.cc-focus li.bad { border-color: #ff5a5f; }
+.cc-focus li b { display: block; font-size: 14px; }
+.cc-focus li small { color: #8b97a8; font-size: 11px; }
+.cc-tip { font-size: 14px; font-weight: 600; }
+.cc-empty { color: #8b97a8; font-size: 12px; }
+.cc-foot { margin-top: 10px; display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: #8b97a8; }
+.cc-foot .ok { color: #3ddc97; }
+.cc-foot .todo { color: #ffc857; }
+</style>
+  <style>
+    html, body { margin: 0; background: transparent; overflow: hidden; }
+    body.browser { background: #0f1419; padding: 12px; }
+    #root { display: inline-block; transform-origin: top left; }
+    body.move .coach-card { outline: 2px dashed #ff4655; cursor: move; -webkit-app-region: drag; }
+    body.move #moveHint { display: block; }
+    #moveHint { display: none; margin-top: 4px; padding: 4px 8px; width: 320px; box-sizing: border-box; border-radius: 6px;
+      background: #ff4655; color: #fff; font: 12px system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="moveHint">드래그해서 옮기고 Ctrl+Shift+L 로 고정</div>
+  <script>
+(()=>{var n=(t,e,s)=>{let p=document.createElement(t);return e&&(p.className=e),s!==void 0&&(p.textContent=s),p},w=t=>{let e=new Date(t);return`${e.getMonth()+1}/${e.getDate()}`};function v(t,e,{tipIndex:s=0,hint:p=""}={}){t.replaceChildren();let o=n("div","coach-card");if(!e){o.append(n("div","cc-empty","\uD2B8\uB808\uC774\uB108\uB97C \uD55C \uBC88 \uC2E4\uD589\uD558\uBA74 \uC5EC\uAE30\uC5D0 \uCF54\uCE58 \uCE74\uB4DC\uAC00 \uD45C\uC2DC\uB429\uB2C8\uB2E4.")),t.append(o);return}let h=n("div","cc-head");if(h.append(n("b","","VALO COACH"),n("span","cc-sens",`${e.sens} \xB7 eDPI ${e.edpi} \xB7 ${e.cm360}cm`)),o.append(h),e.rec&&o.append(n("div","cc-rec",`\uCD94\uCC9C \uAC10\uB3C4 ${e.rec.sens} (\uAC10\uB3C4 \uCC3E\uAE30 ${w(e.rec.date)})`)),o.append(n("div","cc-sec","\uC9D1\uC911 \uD3EC\uC778\uD2B8")),e.focus.length){let u=n("ol","cc-focus");for(let l of e.focus){let g=n("li",l.level);g.append(n("b","",l.cue),n("small","",`${l.title} \xB7 ${l.from}`)),u.append(g)}o.append(u)}else o.append(n("div","cc-empty","\uD6C8\uB828\uD558\uAC70\uB098 \uC2E4\uC804 \uAE30\uB85D\uC744 \uC785\uB825\uD558\uBA74 \uACE0\uCE60 \uC810\uC774 \uC5EC\uAE30\uC5D0 \uB5A0\uC694."));e.tips.length&&(o.append(n("div","cc-sec","\uB77C\uC6B4\uB4DC \uB9AC\uB9C8\uC778\uB354")),o.append(n("div","cc-tip",e.tips[(s%e.tips.length+e.tips.length)%e.tips.length])));let r=n("div","cc-foot");r.append(n("span",e.warmup?"ok":"todo",e.warmup?`\uC624\uB298 \uC6CC\uBC0D\uC5C5 ${e.warmup}\uD68C \u2713`:"\uC624\uB298 \uC6CC\uBC0D\uC5C5 \uC804 \xB7 \uB7AD\uD06C \uC804\uC5D0 5\uBD84")),p&&r.append(n("span","",p)),o.append(r),t.append(o)}var f=document.getElementById("root"),c=window.vatDesktop,d=null,i={tipSeconds:25,opacity:.82,scale:1},y=0,C=0;function a(){if(v(f,d,{tipIndex:y,hint:c?"Ctrl+Shift+N \uB2E4\uC74C \uD301":""}),document.documentElement.style.setProperty("--cc-alpha",String(i.opacity)),f.style.transform=`scale(${i.scale})`,c){let e=f.getBoundingClientRect(),s=document.body.classList.contains("move")?34:0;c.reportSize(Math.ceil(e.width),Math.ceil(e.height+s))}}function $(){y++,a()}function m(){clearInterval(C),i.tipSeconds>0&&(C=setInterval($,i.tipSeconds*1e3))}if(c)c.onCoach(t=>{d=t,a()}),c.onConfig(t=>{i={...i,...t},m(),a()}),c.onNextTip($),c.onMoveMode(t=>{document.body.classList.toggle("move",t),a()}),c.getState().then(t=>{d=t.card,i={...i,...t.config},m(),a()});else{document.body.classList.add("browser");let t=()=>{try{d=JSON.parse(localStorage.getItem("vat.coachCard")||"null")}catch{d=null}a()};window.addEventListener("storage",e=>{e.key==="vat.coachCard"&&t()}),t(),m()}})();
+</script>
+</body>
+</html>

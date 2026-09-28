@@ -26,3 +26,13 @@ replaceOnce(/<script type="module" src="js\/main\.js"><\/script>/, `<script>\n${
 await mkdir('dist', { recursive: true });
 await writeFile('dist/valo-aim-trainer.html', html);
 console.log(`dist/valo-aim-trainer.html (${Math.round(html.length / 1024)} KB)`);
+
+// 오버레이 창 (데스크톱 앱이 띄움. 브라우저에서는 두 번째 모니터용으로 열 수 있음)
+const ov = await build({ entryPoints: ['js/overlay.js'], bundle: true, format: 'iife', minify: true, write: false });
+let ovHtml = await readFile('overlay.html', 'utf8');
+const coachCss = await readFile('css/coach.css', 'utf8');
+ovHtml = ovHtml.replace('<link rel="stylesheet" href="css/coach.css" />', () => `<style>\n${coachCss}</style>`)
+  .replace('<script type="module" src="js/overlay.js"></script>', () => `<script>\n${ov.outputFiles[0].text.replace(/<\/script/gi, '<\\/script')}</script>`);
+if (ovHtml.includes('js/overlay.js') || ovHtml.includes('css/coach.css')) throw new Error('build: overlay inline failed');
+await writeFile('dist/overlay.html', ovHtml);
+console.log('dist/overlay.html');
