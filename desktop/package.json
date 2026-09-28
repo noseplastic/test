@@ -1,0 +1,9 @@
+{
+  "name": "valo-aim-trainer-desktop",
+  "productName": "ValoAimTrainer",
+  "version": "0.1.0",
+  "description": "발로 에임 트레이너 (데스크톱)",
+  "main": "main.cjs",
+  "private": true,
+  "license": "MIT"
+}
