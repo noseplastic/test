@@ -121,6 +121,9 @@ export function summarize(engagements) {
   }
 
   const bodyOrLeg = hits.filter((s) => s.part !== 'head');
+  const atStopped = shots.filter((s) => s.targetStopped === true);
+  const atMoving = shots.filter((s) => s.targetStopped === false);
+  const hitRate = (arr) => (arr.length ? arr.filter((s) => s.part).length / arr.length : NaN);
   const lowShots = shots.filter((s) => s.part !== 'head' && Number.isFinite(s.ey) && s.ey > 0.15);
 
   return {
@@ -152,6 +155,10 @@ export function summarize(engagements) {
     leadRate: lag + lead >= 5 ? lead / (lag + lead) : NaN,
     lowAimRate: shots.length ? lowShots.length / shots.length : NaN,
     bodyHitRate: hits.length ? bodyOrLeg.length / hits.length : NaN,
+    stoppedShots: atStopped.length,
+    movingTargetShots: atMoving.length,
+    accStopped: hitRate(atStopped),
+    accMoving: hitRate(atMoving),
   };
 }
 
@@ -239,6 +246,27 @@ export function buildAdvice(stats, ctx = {}) {
       add('warn', `트래킹 뒤처짐 ${pct(stats.lagRate)}`, '빗나간 샷 대부분이 적이 움직이는 방향의 뒤쪽이에요. 적의 이동 방향으로 크로스헤어를 살짝 먼저 두고, 적이 방향을 바꿔 멈추는 순간(카운터 스트레이프)을 노려 쏘세요.');
     } else if (stats.leadRate > 0.65) {
       add('warn', `트래킹 앞서감 ${pct(stats.leadRate)}`, '적이 가는 방향보다 앞을 쏘고 있어요. ADAD는 방향 전환이 잦아서 예측을 너무 크게 하면 빗나갑니다. 적의 머리를 따라가는 데 집중하세요.');
+    }
+  }
+
+  // 상대가 멈춘 순간을 노리는지 (스트레이프)
+  if (ctx.mode === 'strafe' && stats.stoppedShots >= 5 && stats.movingTargetShots >= 5) {
+    const gap = stats.accStopped - stats.accMoving;
+    const share = stats.stoppedShots / (stats.stoppedShots + stats.movingTargetShots);
+    if (gap > 0.15 && share < 0.5) {
+      add('warn', `멈춘 봇 명중 ${pct(stats.accStopped)} vs 움직이는 봇 ${pct(stats.accMoving)}`,
+        `상대가 카운터 스트레이프로 멈추는 순간 명중률이 훨씬 높은데, 샷의 ${pct(1 - share)}를 움직이는 중에 쐈어요. 상대가 멈추는 순간은 상대도 정확해지는 순간이니, 그 타이밍에 나도 멈춰서 먼저 쏘는 연습을 하세요.`);
+    } else if (gap > 0.15) {
+      add('good', '멈추는 타이밍 공략 좋음', `멈춘 봇 명중률 ${pct(stats.accStopped)}. 상대의 카운터 스트레이프 타이밍을 잘 노리고 있어요.`);
+    }
+  }
+  if (ctx.mode === 'strafe' && ctx.duel && stats.kills + stats.deaths >= 5) {
+    const lose = stats.deaths / (stats.kills + stats.deaths);
+    if (lose > 0.35) {
+      add('bad', `듀얼 패배율 ${pct(lose)}`,
+        '봇이 멈춘 뒤 반응 속도 안에 먼저 맞히지 못했어요. 봇의 머리를 따라가다가(트래킹) 봇이 멈추는 순간 나도 반대 키로 카운터 스트레이프 → 바로 1~2발 탭. 계속 움직이면서 쏘면 탄이 튀어 이길 수 없어요.');
+    } else {
+      add('good', `듀얼 승률 ${pct(1 - lose)}`, '멈춰 쏘는 상대보다 먼저 맞히고 있어요. 적 반응 속도를 한 단계 올려보세요.');
     }
   }
 

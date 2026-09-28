@@ -211,6 +211,8 @@ export const DEFAULT_SETTINGS = {
   difficulty: 'normal',
   distance: '15',
   strafeProfile: 'normal',
+  strafeStops: 'normal',
+  strafeDuel: true,
   duration: 60,
   rounds: 20,
   flickTargets: 30,

@@ -1,7 +1,7 @@
 import { Game, DEFAULT_SETTINGS } from './game.js';
 import { SCENARIOS } from './scenarios.js';
 import { WEAPONS, DIFFICULTY, GAME_YAW } from './config.js';
-import { STRAFE_PROFILES } from './bots.js';
+import { STRAFE_PROFILES, STRAFE_STOPS } from './bots.js';
 import { cm360, edpi, degPerCount, convertSens, sensFromCm360, describeEdpi, roundSens } from './sens.js';
 
 const $ = (id) => document.getElementById(id);
@@ -123,6 +123,7 @@ function initMenu() {
   fillSelect('weapon', Object.entries(WEAPONS).map(([k, w]) => [k, `${w.name} (${(6.75 * w.moveMult).toFixed(2)} m/s)`]));
   fillSelect('difficulty', Object.entries(DIFFICULTY).map(([k, d]) => [k, `${d.name} (${d.reactionMs}ms)`]));
   fillSelect('strafeProfile', Object.entries(STRAFE_PROFILES).map(([k, p]) => [k, p.name]));
+  fillSelect('strafeStops', Object.entries(STRAFE_STOPS).map(([k, p]) => [k, p.name]));
   fillSelect('convGame', Object.entries(GAME_YAW).filter(([k]) => k !== 'valorant').map(([k, g]) => [k, g.name]));
 
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
@@ -247,7 +248,7 @@ function showResult(res) {
 
   const tiles = [];
   const t = (label, value) => { if (value !== '-' && value !== undefined) tiles.push([label, value]); };
-  if (res.mode === 'peek' || res.mode === 'hold') t('승 / 패', `${st.kills} / ${st.deaths}`);
+  if (res.mode === 'peek' || res.mode === 'hold' || res.settings.duel) t('승 / 패', `${st.kills} / ${st.deaths}`);
   else t('킬', `${st.kills}`);
   t('정확도', pct(st.accuracy));
   t('헤드샷 비율', pct(st.headshotRate));
@@ -262,6 +263,8 @@ function showResult(res) {
   if (res.mode === 'strafe') {
     t('빗나감: 뒤처짐', pct(st.lagRate));
     t('빗나감: 앞서감', pct(st.leadRate));
+    t('멈춘 봇 명중률', pct(st.accStopped));
+    t('움직이는 봇 명중률', pct(st.accMoving));
   }
   $('resStats').innerHTML = tiles.map(([k, v]) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`).join('');
 

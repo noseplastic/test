@@ -1,5 +1,5 @@
 import { DIFFICULTY, VALORANT } from './config.js';
-import { StrafeAI, STRAFE_PROFILES, ScriptedMover, buildPeekScript, PEEK_TYPES, makeRng, rand } from './bots.js';
+import { StrafeAI, STRAFE_PROFILES, STRAFE_STOPS, ScriptedMover, buildPeekScript, PEEK_TYPES, makeRng, rand } from './bots.js';
 import { summarize, buildAdvice, analyzeFlick, mean } from './analysis.js';
 import { recommendSensitivity, edpi } from './sens.js';
 import { DEG } from './game.js';
@@ -65,6 +65,7 @@ class Scenario {
     e.shots.push({
       t: shot.t, part: shot.bot === bot ? shot.part : null, moving: shot.moving, speed: shot.speed,
       ex: err.ex, ey: err.ey, targetVel: bot.angRate, spray: shot.spray,
+      targetStopped: bot.speed <= bot.maxSpeed * VALORANT.ACCURATE_SPEED_RATIO,
     });
     if (!Number.isFinite(e.firstShotT)) {
       e.firstShotT = shot.t;
@@ -102,13 +103,16 @@ class Scenario {
     const stats = summarize(this.engagements);
     stats.wastedShots = this.wastedShots;
     const s = this.settings;
-    const ctx = { mode: this.key, edpi: edpi(s.sens, s.dpi) };
+    const ctx = { mode: this.key, edpi: edpi(s.sens, s.dpi), duel: this.key === 'strafe' && !!s.strafeDuel };
     const advice = buildAdvice(stats, ctx);
     return {
       mode: this.key,
       modeName: this.name,
       date: Date.now(),
-      settings: { sens: s.sens, dpi: s.dpi, weapon: s.weapon, difficulty: s.difficulty, distance: s.distance },
+      settings: {
+        sens: s.sens, dpi: s.dpi, weapon: s.weapon, difficulty: s.difficulty, distance: s.distance,
+        duel: this.key === 'strafe' && !!s.strafeDuel,
+      },
       stats,
       advice,
       ...extra,
@@ -142,6 +146,9 @@ export class StrafeScenario extends Scenario {
     g.player.bounds = { x1: -4, x2: 4, z1: -1, z2: 2 };
     this.bot = g.spawnBot();
     this.profile = STRAFE_PROFILES[this.settings.strafeProfile] || STRAFE_PROFILES.normal;
+    this.stops = STRAFE_STOPS[this.settings.strafeStops] || STRAFE_STOPS.normal;
+    this.duel = !!this.settings.strafeDuel;
+    this.name = this.duel ? '스트레이프 듀얼 (1:1)' : '스트레이프 봇 (ADAD)';
     this.duration = this.settings.duration;
     this.respawnT = 0;
     this.spawn();
@@ -155,7 +162,10 @@ export class StrafeScenario extends Scenario {
   spawn() {
     const x = rand(this.rng, -3, 3);
     this.bot.place(x, -this.distance());
-    this.ai = new StrafeAI(this.rng, { minX: -6, maxX: 6, profile: this.profile });
+    this.ai = new StrafeAI(this.rng, { minX: -6, maxX: 6, profile: this.profile, stopChance: this.stops.chance });
+    // 이미 스트레이프 중인 상태로 등장 (등장하자마자 멈춰서 쏘지 않도록)
+    this.bot.vel = { x: this.ai.dir * this.bot.maxSpeed, z: 0 };
+    this.stoppedSinceT = NaN;
     this.begin();
     this.bot.sync();
     this.markAppear(this.bot);
@@ -174,9 +184,28 @@ export class StrafeScenario extends Scenario {
       b.move(dt, { x: dir * b.maxSpeed, z: 0 });
       g.trackBot(b, dt);
       this.trackPath(b);
+      if (this.duel) this.duelFire(b);
     } else if ((this.respawnT -= dt) <= 0) {
       this.spawn();
     }
+  }
+
+  // 듀얼: 봇이 카운터 스트레이프로 멈춰 정확해진 뒤 반응 속도가 지나면 나를 쏜다
+  duelFire(b) {
+    const g = this.game;
+    const accurate = b.speed <= b.maxSpeed * VALORANT.ACCURATE_SPEED_RATIO;
+    if (!accurate) {
+      this.stoppedSinceT = NaN;
+      return;
+    }
+    if (!Number.isFinite(this.stoppedSinceT)) this.stoppedSinceT = g.time;
+    if (g.time - this.stoppedSinceT < this.reactionMs / 1000 || !g.botCanSeePlayer(b)) return;
+    g.playerDie();
+    this.end('death');
+    this.feedback('사망 · 봇이 멈춘 순간 먼저 쏨', 'bad');
+    b.alive = false;
+    b.setVisible(false);
+    this.respawnT = 0.8;
   }
 
   onShot(shot) {
@@ -187,7 +216,8 @@ export class StrafeScenario extends Scenario {
     if (killed) {
       const e = this.end('kill');
       const ttk = Math.round((e.endT - e.appearT) * 1000);
-      this.feedback(`${shot.part === 'head' ? '헤드샷' : '킬'} · ${ttk}ms${shot.moving ? ' · 이동 중 사격' : ''}`, shot.part === 'head' ? 'good' : 'info');
+      const when = e.shots[e.shots.length - 1]?.targetStopped ? ' · 멈춘 순간' : '';
+      this.feedback(`${shot.part === 'head' ? '헤드샷' : '킬'} · ${ttk}ms${when}${shot.moving ? ' · 이동 중 사격' : ''}`, shot.part === 'head' ? 'good' : 'info');
       this.respawnT = 0.35;
     }
   }
@@ -197,12 +227,14 @@ export class StrafeScenario extends Scenario {
     return {
       title: this.name,
       main: `${Math.max(0, Math.ceil(this.duration - this.game.time))}s`,
-      info: `킬 ${c.kills} · 정확도 ${c.acc}% · 헤드 ${c.hs}%`,
+      info: this.duel
+        ? `승 ${c.kills} · 패 ${c.deaths} · 헤드 ${c.hs}%`
+        : `킬 ${c.kills} · 정확도 ${c.acc}% · 헤드 ${c.hs}%`,
     };
   }
 
   result() {
-    return this.baseResult({ extra: { profile: this.profile.name } });
+    return this.baseResult({ extra: { profile: this.profile.name, stops: this.stops.name } });
   }
 }
 
@@ -646,7 +678,7 @@ export class FlickScenario extends Scenario {
 }
 
 export const SCENARIOS = {
-  strafe: { cls: StrafeScenario, name: '스트레이프 봇', desc: '봇이 발로란트 속도로 ADAD 무빙. 트래킹·카운터 스트레이프 타이밍 연습' },
+  strafe: { cls: StrafeScenario, name: '스트레이프 봇 / 듀얼', desc: '봇이 발로란트 속도로 ADAD 하다가 카운터 스트레이프로 멈춤. 듀얼 모드면 멈춘 봇이 반격' },
   peek: { cls: PeekScenario, name: '코너 피킹 (내가 피킹)', desc: '벽 뒤에서 D로 피킹 → 멈춰서 1발. 적은 앵글을 잡고 반응 속도 후 사격' },
   hold: { cls: HoldScenario, name: '앵글 홀드 (적이 피킹)', desc: '와이드 스윙·타이트 피크·숄더 피크·가로지르기에 대응' },
   flick: { cls: FlickScenario, name: '플릭 (헤드 전용)', desc: '무작위 위치의 머리를 빠르게. 오버/언더슈팅 분석' },

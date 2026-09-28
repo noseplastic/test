@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { cm360, edpi, convertSens, sensFromCm360, recommendSensitivity } from '../js/sens.js';
 import { stepVelocity, maxSpeedFor, isAccurate, spreadFor, counterStrafeDistance } from '../js/movement.js';
 import { analyzeFlick, summarize, buildAdvice, median } from '../js/analysis.js';
-import { StrafeAI, ScriptedMover, buildPeekScript, makeRng } from '../js/bots.js';
+import { StrafeAI, STRAFE_STOPS, ScriptedMover, buildPeekScript, makeRng } from '../js/bots.js';
 import { WEAPONS, VALORANT } from '../js/config.js';
 
 const close = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg ?? ''} expected ${b}, got ${a}`);
@@ -119,6 +119,41 @@ test('StrafeAI stays inside its lane', () => {
   }
   assert.ok(minX > -7 && maxX < 7, `${minX}..${maxX}`);
   assert.ok(changes > 60, `direction changes ${changes}`);
+});
+
+// 60초 동안 봇을 돌려서 "정확도 구간까지 멈춘" 횟수와 그 시간 길이를 센다
+function countStops(stopChance, seed = 3) {
+  const rng = makeRng(seed);
+  const ai = new StrafeAI(rng, { minX: -6, maxX: 6, stopChance });
+  const max = 5.4;
+  let x = 0, vx = max;
+  const dt = 1 / 120;
+  const stops = [];
+  let stopStart = null;
+  for (let i = 0; i < 120 * 60; i++) {
+    const dir = ai.update(dt, x, vx);
+    vx = stepVelocity({ x: vx, z: 0 }, { x: dir * max, z: 0 }, max, dt).x;
+    x += vx * dt;
+    const still = Math.abs(vx) <= max * VALORANT.ACCURATE_SPEED_RATIO;
+    if (still && stopStart === null) stopStart = i * dt;
+    if (!still && stopStart !== null) {
+      // 방향 전환 순간에도 속도가 잠깐 0을 지나므로 0.15초 이상만 "멈춤"으로 센다
+      if (i * dt - stopStart >= 0.15) stops.push(i * dt - stopStart);
+      stopStart = null;
+    }
+  }
+  return stops;
+}
+
+test('strafe bot counter-strafes to a stop, more often with a higher setting', () => {
+  const none = countStops(STRAFE_STOPS.none.chance);
+  const rare = countStops(STRAFE_STOPS.rare.chance);
+  const often = countStops(STRAFE_STOPS.often.chance);
+  assert.equal(none.length, 0);
+  assert.ok(rare.length >= 8, `rare stops ${rare.length}`);
+  assert.ok(often.length > rare.length, `often ${often.length} vs rare ${rare.length}`);
+  // 짧은 페이크 멈춤과 쏠 수 있을 만큼 긴 멈춤이 섞인다
+  assert.ok(often.some((d) => d < 0.3) && often.some((d) => d > 0.45), often.map((d) => d.toFixed(2)).join(','));
 });
 
 // 합성 플릭 궤적: 20° 거리를 이동해 end 지점에서 멈춤

@@ -21,19 +21,32 @@ export function brake(vx) {
 
 // 좌우 스트레이프(ADAD) 봇. 반환값은 x축 입력 방향 (-1, 0, 1).
 export const STRAFE_PROFILES = {
-  easy: { name: '느린 무빙', minHold: 0.45, maxHold: 1.1, stopChance: 0.3 },
-  normal: { name: '일반 ADAD', minHold: 0.22, maxHold: 0.7, stopChance: 0.25 },
-  hard: { name: '빠른 지글', minHold: 0.12, maxHold: 0.4, stopChance: 0.2 },
+  easy: { name: '느린 무빙', minHold: 0.45, maxHold: 1.1 },
+  normal: { name: '일반 ADAD', minHold: 0.22, maxHold: 0.7 },
+  hard: { name: '빠른 지글', minHold: 0.12, maxHold: 0.4 },
 };
 
+// 방향을 바꿀 때마다 카운터 스트레이프로 멈춰 설 확률
+export const STRAFE_STOPS = {
+  none: { name: '멈춤 없음', chance: 0 },
+  rare: { name: '가끔 멈춤', chance: 0.15 },
+  normal: { name: '보통', chance: 0.3 },
+  often: { name: '자주 멈춤', chance: 0.5 },
+};
+
+// 이만큼 연속으로 스트레이프하면 한 번은 반드시 멈춘다 (멈춤 없음 제외)
+const MAX_STRAFES_WITHOUT_STOP = 5;
+
 export class StrafeAI {
-  constructor(rng, { minX, maxX, profile = STRAFE_PROFILES.normal }) {
+  constructor(rng, { minX, maxX, profile = STRAFE_PROFILES.normal, stopChance = STRAFE_STOPS.normal.chance }) {
     this.rng = rng;
     this.minX = minX;
     this.maxX = maxX;
     this.profile = profile;
+    this.stopChance = stopChance;
     this.dir = rng() < 0.5 ? -1 : 1;
     this.stopping = false;
+    this.strafesSinceStop = 0;
     this.timer = rand(rng, profile.minHold, profile.maxHold);
   }
 
@@ -41,12 +54,15 @@ export class StrafeAI {
     this.timer -= dt;
     if (this.timer <= 0) {
       const p = this.profile;
-      if (!this.stopping && this.rng() < p.stopChance) {
-        // 카운터 스트레이프로 멈춰 서서 "쏘는" 타이밍
+      const forced = this.stopChance > 0 && this.strafesSinceStop >= MAX_STRAFES_WITHOUT_STOP;
+      if (!this.stopping && (forced || this.rng() < this.stopChance)) {
+        // 카운터 스트레이프로 멈춰 서서 쏘는 타이밍. 짧게 멈췄다 다시 움직이는 페이크도 섞는다.
         this.stopping = true;
-        this.timer = rand(this.rng, 0.15, 0.45);
+        this.strafesSinceStop = 0;
+        this.timer = rand(this.rng, 0.2, 0.75);
       } else {
         this.stopping = false;
+        this.strafesSinceStop++;
         this.dir = this.rng() < 0.7 ? -this.dir : this.dir;
         this.timer = rand(this.rng, p.minHold, p.maxHold);
       }
