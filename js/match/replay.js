@@ -12,6 +12,11 @@ import { VALORANT, WEAPONS } from '../config.js';
 import { isAccurate, maxSpeedFor, StopTracker } from '../movement.js';
 import { summarize, summarizeStops, buildAdvice, median, mean } from '../analysis.js';
 import { matchAdvice, flickClass, trackingBias } from './engine.js';
+import { isVisible } from './visibility.js';
+
+// 연막 반지름 (cm). 요원마다 조금씩 다르지만 대략값 — 실제 리플레이로 확인 필요
+export const SMOKE_RADIUS = 450;
+const SMOKE_PATH = /Smoke/i;
 
 const RAD = Math.PI / 180;
 const wrapDeg = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
@@ -24,6 +29,12 @@ export const AGENTS = {
   Mage: 'Harbor', Nox: 'Vyse', Pandemic: 'Viper', Phoenix: 'Phoenix', Rift: 'Astra', Sarge: 'Brimstone',
   Sequoia: 'Iso', Smonk: 'Clove', Sprinter: 'Neon', Stealth: 'Yoru', Terra: 'Waylay', Thorne: 'Sage',
   Vampire: 'Reyna', Wraith: 'Omen', Wushu: 'Jett',
+};
+
+// 맵 코드명 → 이름 (리플레이의 /Game/Maps/<코드명>/)
+export const MAPS = {
+  Ascent: 'Ascent', Bonsai: 'Split', Triad: 'Haven', Duality: 'Bind', Port: 'Icebox', Foxtrot: 'Breeze',
+  Canyon: 'Fracture', Pitt: 'Pearl', Jam: 'Lotus', Juliett: 'Sunset', Infinity: 'Abyss',
 };
 
 export function parseNdjson(text) {
@@ -78,8 +89,14 @@ export function compactReplayLine(o) {
     }
     case 'actor_spawned': {
       const path = `${o.archetype_path || ''} ${o.actor_path || ''} ${o.replication_class_path || ''}`;
-      return path.includes('/Game/Characters/') ? { type: o.type, time_ms: o.time_ms, actor_net_guid: o.actor_net_guid, archetype_path: path } : null;
+      const mm = path.match(/\/Game\/Maps\/([A-Za-z0-9]+)\//);
+      if (mm) return { type: 'map_hint', map: mm[1] };
+      return path.includes('/Game/Characters/')
+        ? { type: o.type, time_ms: o.time_ms, actor_net_guid: o.actor_net_guid, archetype_path: path, location: o.location }
+        : null;
     }
+    case 'actor_closed':
+      return { type: o.type, time_ms: o.time_ms, actor_net_guid: o.actor_net_guid };
     case 'export_group_received': {
       const path = o.export_group_path || o.class_path || '';
       return KEEP_GROUP.test(path)
@@ -146,7 +163,10 @@ export function buildReplayModel(events, movement) {
   const moves = new Map();
   const shots = [];
   const damage = [];
+  const smokes = new Map();
+  const closed = new Map();
   let ownerHint = null;
+  const mapHints = new Map();
   const player = (ps) => {
     if (!players.has(ps)) players.set(ps, { ps, subject: null, agent: null, characters: new Set() });
     return players.get(ps);
@@ -160,10 +180,20 @@ export function buildReplayModel(events, movement) {
 
   for (const e of events) {
     const t = (e.time_ms ?? 0) / 1000;
+    if (e.type === 'map_hint') {
+      mapHints.set(e.map, (mapHints.get(e.map) || 0) + 1);
+      continue;
+    }
     if (e.type === 'actor_spawned') {
       const path = `${e.archetype_path || ''} ${e.actor_path || ''} ${e.replication_class_path || ''}`;
       const m = path.match(/\/Game\/Characters\/([A-Za-z]+)\//);
-      if (m) charAgent.set(e.actor_net_guid, AGENTS[m[1]] || m[1]);
+      // 연막 (투사체가 아니라 터진 뒤 남는 연막 구역)
+      if (SMOKE_PATH.test(path) && !/Projectile/i.test(path) && vec(e.location)) {
+        smokes.set(e.actor_net_guid, { guid: e.actor_net_guid, t0: t, t1: t + 20, ...vec(e.location), r: SMOKE_RADIUS, path });
+      } else if (m && /_PC(\.|_C)/.test(path)) charAgent.set(e.actor_net_guid, AGENTS[m[1]] || m[1]);
+      else if (m && !charAgent.has(e.actor_net_guid) && !/Ability|Projectile|GameObject|Zone|Equippable/i.test(path)) charAgent.set(e.actor_net_guid, AGENTS[m[1]] || m[1]);
+    } else if (e.type === 'actor_closed') {
+      closed.set(e.actor_net_guid, t);
     } else if (e.type === 'export_group_received' && e.payload) {
       const p = e.payload;
       const path = e.export_group_path || e.class_path || '';
@@ -214,7 +244,13 @@ export function buildReplayModel(events, movement) {
   damage.sort((a, b) => a.t - b.t);
   for (const d of damage) d.victimPs = charToPs.get(d.victimChar) ?? null;
 
-  return { players, charToPs, moves, shots, damage, ownerHint };
+  for (const sm of smokes.values()) if (closed.has(sm.guid) && closed.get(sm.guid) > sm.t0) sm.t1 = closed.get(sm.guid);
+
+  const mapCode = [...mapHints].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  return {
+    players, charToPs, moves, shots, damage, smokes: [...smokes.values()], ownerHint,
+    mapCode, mapName: mapCode ? MAPS[mapCode] || mapCode : null,
+  };
 }
 
 // ─── 한 플레이어의 위치·시야 (라운드마다 캐릭터가 바뀌므로 모두 합친다) ───
@@ -345,6 +381,27 @@ export function analyzeReplay(model, me, opts = {}) {
   };
   const headRadius = (dist) => Math.atan(0.125 / Math.max(0.5, dist)) / RAD;
 
+  // 적 target 이 time t 에 내 화면에 보였는지 (벽·연막·시야각)
+  const visibleAt = (target, t) => {
+    const v = viewAt(t);
+    const tp = trackOf(target).at(t);
+    if (!v || !tp) return false;
+    const eye = eyeOf(v.pos);
+    return isVisible({
+      bvh: opts.map.bvh, smokes: model.smokes || [], eye, head: headOf(tp), t,
+      errOf: (p) => { const d = dirOf(eye, p, conv); return { ex: wrapDeg(d.yaw - v.yaw), ey: d.pitch - v.pitch }; },
+    });
+  };
+  const findAppear = (target, endRef) => {
+    let seen = false, t = endRef;
+    for (; t >= endRef - 5; t -= 0.01) {
+      if (visibleAt(target, t)) seen = true;
+      else if (seen) break;
+      else if (endRef - t > 0.3) return NaN; // 쏜 순간 근처에 안 보였음 (벽 너머 사격 등)
+    }
+    return seen ? t + 0.01 : NaN;
+  };
+
   // 샷을 교전(같은 적, 1.5초 이내 연속)으로 묶는다
   const engagements = [];
   let cur = null;
@@ -393,9 +450,12 @@ export function analyzeReplay(model, me, opts = {}) {
   const out = [];
   for (const g of engagements) {
     const endRef = g.shots.length ? g.firstT : g.death.t;
-    // 조준 경로: 첫 발(또는 사망) 1초 전부터
+    // 맵이 있으면 적이 화면에 보이기 시작한 순간 (첫 발부터 거슬러 올라가며 계속 보이던 구간의 시작)
+    const appearT = opts.map ? findAppear(g.target, endRef) : NaN;
+    // 조준 경로: 보인 순간(모르면 첫 발 1초 전)부터 첫 발(또는 사망)까지
+    const pathStart = Number.isFinite(appearT) ? Math.min(appearT, endRef - 0.05) : endRef - 1.0;
     const path = [];
-    for (let t = endRef - 1.0; t <= endRef + 1e-9; t += 0.01) {
+    for (let t = pathStart; t <= endRef + 1e-9; t += 0.01) {
       const e = errTo(g.target, t);
       if (e) path.push({ t, ex: e.ex, ey: e.ey });
     }
@@ -411,7 +471,9 @@ export function analyzeReplay(model, me, opts = {}) {
       onset = peak;
       while (onset > 0 && !(speed[onset] < quiet && speed[onset - 1] < quiet)) onset--;
     }
-    const start = path[onset];
+    // 보인 순간을 알면 그때의 크로스헤어 오차, 모르면 반응을 시작한 순간의 오차
+    const known = Number.isFinite(appearT);
+    const start = known ? path[0] : path[onset];
     const dist = errTo(g.target, endRef)?.dist ?? 20;
     const rDeg = headRadius(dist);
     const kill = model.damage.find((d) => d.attackerPs === me && d.victimPs === g.target && d.killed && d.t >= g.firstT - 0.05 && d.t <= g.lastT + 0.3);
@@ -449,13 +511,15 @@ export function analyzeReplay(model, me, opts = {}) {
     out.push({
       mode: 'replay',
       target: g.target,
-      appearT: path[onset].t,
+      appearT: known ? path[0].t : path[onset].t,
+      onsetT: path[onset].t,
+      appearKnown: known,
       firstShotT: g.shots.length ? g.firstT : NaN,
       endT: kill ? kill.t : g.death ? g.death.t : g.lastT,
       result: kill ? 'kill' : g.death ? 'death' : 'escape',
       // 알 수 없는 "적이 보인 순간" 대신 반응을 시작한 순간의 크로스헤어 오차
       placement: { ex: start.ex, ey: start.ey },
-      path: path.slice(onset),
+      path: known ? path : path.slice(onset),
       radiusDeg: rDeg,
       shots: engShots,
       bait: false,
@@ -479,8 +543,12 @@ export function analyzeReplay(model, me, opts = {}) {
   const stats = { ...summarize(out.filter((e) => !e.noShot)), ...summarizeStops(stops) };
   stats.deaths = out.filter((e) => e.result === 'death').length;
   // 반응 속도는 적이 보인 순간을 몰라서 계산하지 않는다. 대신 반응 시작 → 첫 발
-  stats.reactionMs = NaN;
-  stats.aimTimeMs = median(out.filter((e) => Number.isFinite(e.firstShotT)).map((e) => (e.firstShotT - e.appearT) * 1000));
+  // 반응 속도(보인 순간 → 첫 발)는 맵이 있어 보인 순간을 알 때만
+  const react = out.filter((e) => e.appearKnown && Number.isFinite(e.firstShotT)).map((e) => (e.firstShotT - e.appearT) * 1000);
+  stats.reactionMs = median(react);
+  stats.reactionSamples = react.length;
+  stats.appearKnownRate = out.length ? out.filter((e) => e.appearKnown).length / out.length : NaN;
+  stats.aimTimeMs = median(out.filter((e) => Number.isFinite(e.firstShotT)).map((e) => (e.firstShotT - e.onsetT) * 1000));
   Object.assign(stats, trackingBias(out));
   const shotsAll = out.flatMap((e) => e.shots);
   stats.aimMovingShotRate = shotsAll.length ? shotsAll.filter((s) => s.relSpeed > 15).length / shotsAll.length : NaN;
@@ -504,6 +572,9 @@ export function analyzeReplay(model, me, opts = {}) {
       viewConvention: vc,
       eyeZ,
       flickSamples: out.filter((e) => flickClass(e)).length,
+      map: opts.map?.name || null,
+      appearKnown: out.filter((e) => e.appearKnown).length,
+      smokes: (model.smokes || []).length,
     },
   };
 }

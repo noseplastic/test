@@ -342,6 +342,16 @@ ipcMain.handle('replay:read', async (_e, file, offset, length) => {
   }
 });
 
+// 로컬에서 추출한 맵 충돌 모델: userData/maps/<코드명>.json (저장소·배포에 포함하지 않음)
+ipcMain.handle('maps:get', async (_e, code) => {
+  if (typeof code !== 'string' || !/^[A-Za-z0-9]+$/.test(code)) return null;
+  try {
+    return await fs.promises.readFile(path.join(app.getPath('userData'), 'maps', `${code}.json`), 'utf8');
+  } catch {
+    return null;
+  }
+});
+
 app.on('second-instance', showTrainer);
 
 app.whenReady().then(() => {

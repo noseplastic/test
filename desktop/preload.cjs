@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld('vatDesktop', {
   pickReplay: () => ipcRenderer.invoke('replay:pick'),
   exportReplay: (vrfPath) => ipcRenderer.invoke('replay:export', vrfPath),
   readFileSlice: (path, offset, length) => ipcRenderer.invoke('replay:read', path, offset, length),
+  getMap: (code) => ipcRenderer.invoke('maps:get', code),
 });

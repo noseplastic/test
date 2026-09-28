@@ -6,6 +6,7 @@ import { cm360, edpi, degPerCount, convertSens, sensFromCm360, describeEdpi, rou
 import { buildCoachCard } from './coach.js';
 import { validateResult } from './match/validate.js';
 import { readCompact, fileChunks, buildReplayModel, analyzeReplay, guessMe } from './match/replay.js';
+import { loadMap, checkMapFit } from './match/visibility.js';
 import { flickClass } from './match/engine.js';
 
 const $ = (id) => document.getElementById(id);
@@ -461,6 +462,7 @@ function saveSession() {
 // ─── 실전 리플레이 ───
 let replayModel = null;
 let replayName = '';
+let replayMap = null;
 
 const setReplayStatus = (text) => { $('replayStatus').textContent = text; };
 
@@ -489,7 +491,14 @@ async function loadReplay(eventsChunks, movementChunks, name) {
   const me = players.find((p) => saved && p.subject === saved)?.ps ?? guessMe(m) ?? players[0].ps;
   $('replayMe').innerHTML = players.map((p) => `<option value="${p.ps}" ${p.ps === me ? 'selected' : ''}>${escapeHtml(p.agent || '요원 미상')} · ${escapeHtml((p.subject || String(p.ps)).slice(0, 8))} · 발사 ${shotCount(p.ps)}</option>`).join('');
   show('replayPlayerRow');
-  setReplayStatus(`${name} · 플레이어 ${m.players.size}명 · 발사 ${m.shots.length} · 명중 기록 ${m.damage.length}`);
+  setReplayStatus(`${name} · 맵 ${m.mapName || '미상'} · 플레이어 ${m.players.size}명 · 발사 ${m.shots.length} · 명중 기록 ${m.damage.length} · 연막 ${m.smokes.length}`);
+  replayMap = null;
+  $('replayMapStatus').textContent = '';
+  // 데스크톱 앱: 로컬 맵 폴더에 이 맵이 있으면 자동으로
+  if (m.mapCode && window.vatDesktop?.getMap) {
+    const text = await window.vatDesktop.getMap(m.mapCode);
+    if (text) useMap(text);
+  }
   runReplayAnalysis();
 }
 
@@ -498,13 +507,27 @@ function runReplayAnalysis() {
   const me = Number($('replayMe').value);
   const subject = replayModel.players.get(me)?.subject;
   if (subject) store.set('vat.replaySubject', subject);
-  const res = analyzeReplay(replayModel, me);
+  const res = analyzeReplay(replayModel, me, replayMap ? { map: replayMap } : {});
   renderReplay(res);
   if (res.engagements.length) {
     coachSessions.unshift({ modeName: '실전 리플레이', date: Date.now(), advice: res.advice.map(({ level, title, key }) => ({ level, title, key })) });
     coachSessions = coachSessions.slice(0, 5);
     store.set('vat.coachSessions', coachSessions);
     pushCoach();
+  }
+}
+
+function useMap(text) {
+  try {
+    replayMap = loadMap(text);
+    // 좌표가 맞는지: 플레이어 위치 발밑에 바닥이 있는 비율
+    const pos = [...replayModel.moves.values()].flatMap((arr) => arr.filter((_, i) => i % 200 === 0));
+    const fit = checkMapFit(replayMap.bvh, pos);
+    $('replayMapStatus').textContent = `맵 ${replayMap.name} · 삼각형 ${replayMap.bvh.count.toLocaleString()}개 · 발밑 바닥 일치 ${pct(fit)}` +
+      (fit < 0.8 ? ' — 좌표가 리플레이와 맞지 않는 것 같습니다' : '');
+  } catch (err) {
+    replayMap = null;
+    $('replayMapStatus').textContent = `맵 파일 오류: ${err.message}`;
   }
 }
 
@@ -520,8 +543,9 @@ function renderReplay(res) {
     ['헤드샷 비율 (실제)', pct(st.headshotRate)],
     ['이동 중 사격', pct(st.movingShotRate)],
     ['조준 이동 중 사격', pct(st.aimMovingShotRate)],
-    ['반응 시작 때 상하 오차', Number.isFinite(st.placementPitch) ? `${fmt(st.placementPitch, 1)}°` : '-'],
-    ['반응 시작 때 좌우 오차', Number.isFinite(st.placementYaw) ? `${fmt(st.placementYaw, 1)}°` : '-'],
+    [`${replayMap ? '적이 보인 순간' : '반응 시작 때'} 상하 오차`, Number.isFinite(st.placementPitch) ? `${fmt(st.placementPitch, 1)}°` : '-'],
+    [`${replayMap ? '적이 보인 순간' : '반응 시작 때'} 좌우 오차`, Number.isFinite(st.placementYaw) ? `${fmt(st.placementYaw, 1)}°` : '-'],
+    ['반응 속도 (보인 순간→첫 발)', Number.isFinite(st.reactionMs) ? `${Math.round(st.reactionMs)}ms` : '-'],
     ['조준 시간 (반응→첫 발)', Number.isFinite(st.aimTimeMs) ? `${Math.round(st.aimTimeMs)}ms` : '-'],
     ['오버 / 언더슈팅', `${pct(st.overshootRate)} / ${pct(st.undershootRate)}`],
     ['트래킹 뒤처짐', pct(st.lagRate)],
@@ -552,6 +576,7 @@ function renderReplay(res) {
       <ul class="engine-per">
         <li>내 이동·시야 기록 ${d.myMoveSamples}개 · 평균 간격 ${Number.isFinite(d.moveIntervalMs) ? d.moveIntervalMs + 'ms' : '-'} (간격이 크면 플릭 분석이 부정확)</li>
         <li>내 발사 ${d.myShots}발 · 적으로 본 플레이어 ${d.enemies.map(name).join(', ')}</li>
+        <li>맵 ${escapeHtml(replayModel.mapName || '미상')} ${d.map ? `· 충돌 모델 사용 · 보인 순간 계산 ${d.appearKnown}/${res.engagements.length} 교전` : '· 충돌 모델 없음 (보인 순간 대신 반응 시작 기준)'} · 연막 ${d.smokes}개</li>
         <li>좌표 보정: ${cal ? `헤드 명중 ${cal.samples}발 기준 오차 ${fmt(cal.err, 2)}° · 머리 높이 +${cal.headZ}cm` : '헤드 명중이 3발 미만이라 기본값 사용'}</li>
         <li>시야 규칙: ${Number.isFinite(d.viewConvention.err) ? `이동 기록 ↔ 발사 조준 방향 오차 ${fmt(d.viewConvention.err, 2)}° (${d.viewConvention.samples}발)` : '확인 불가'} · 눈 높이 ${Number.isFinite(d.eyeZ) ? `+${fmt(d.eyeZ, 0)}cm` : '-'}</li>
       </ul>
@@ -615,6 +640,12 @@ function initReplay() {
     loadReplay(fileChunks(ev), fileChunks(mv), ev.name.replace(/events.*$/i, '') || '리플레이');
   });
   $('replayMe').addEventListener('change', runReplayAnalysis);
+  $('replayMap').addEventListener('change', async () => {
+    const f = $('replayMap').files[0];
+    if (!f || !replayModel) return;
+    useMap(await f.text());
+    runReplayAnalysis();
+  });
 }
 
 function renderHistory() {
