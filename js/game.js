@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VALORANT, HITBOX, WEAPONS, PLAYER_HP } from './config.js';
-import { stepVelocity, maxSpeedFor, isAccurate, spreadFor } from './movement.js';
+import { stepVelocity, maxSpeedFor, isAccurate, spreadFor, StopTracker } from './movement.js';
 
 export const DEG = Math.PI / 180;
 export const wrapDeg = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
@@ -220,6 +220,7 @@ export const DEFAULT_SETTINGS = {
   crossSize: 6,
   crossGap: 3,
   crossDot: true,
+  speedGraph: true,
   volume: 0.4,
 };
 
@@ -272,6 +273,8 @@ export class Game {
     this.sprayIndex = 0;
     this.lastFrame = performance.now();
     this.fps = 0;
+    this.stopTracker = new StopTracker();
+    this.stopEvents = [];
 
     this.bindInput();
     this.resize();
@@ -604,6 +607,8 @@ export class Game {
     this.nextFireT = 0;
     this.keys.clear();
     this.mouseDown = false;
+    this.stopTracker = new StopTracker();
+    this.stopEvents = [];
     this.clearWorld();
     this.player.bounds = null;
     this.player.canMove = true;
@@ -666,10 +671,11 @@ export class Game {
     let wx = rx * ix + fx * iz, wz = rz * ix + fz * iz;
     const wl = Math.hypot(wx, wz);
     if (wl > 0) { wx = (wx / wl) * max; wz = (wz / wl) * max; }
+    const opposing = wx * p.vel.x + wz * p.vel.z < 0;
     p.vel = stepVelocity(p.vel, { x: wx, z: wz }, max, dt);
     p.pos.x += p.vel.x * dt;
     p.pos.z += p.vel.z * dt;
-    this.collidePlayer();
+    if (this.collidePlayer()) this.stopTracker.cancel();
     this.syncCamera();
 
     this.scenario?.update(dt);
@@ -683,11 +689,20 @@ export class Game {
     }
 
     const speed = Math.hypot(p.vel.x, p.vel.z);
+    const runSpeed = maxSpeedFor(w, false);
+    const threshold = runSpeed * VALORANT.ACCURATE_SPEED_RATIO;
+    const stop = this.stopTracker.update(this.time, speed, runSpeed, threshold, opposing);
+    if (stop) {
+      this.stopEvents.push(stop);
+      this.hooks.onStop?.(stop);
+    }
+    const bot = this.bots.find((b) => b.alive && b.group.visible);
     this.hooks.onHud?.({
       speed,
+      botSpeed: bot ? bot.speed : NaN,
       accurate: isAccurate(speed, w),
-      threshold: maxSpeedFor(w, false) * VALORANT.ACCURATE_SPEED_RATIO,
-      runSpeed: maxSpeedFor(w, false),
+      threshold,
+      runSpeed,
       yaw: ((-p.yaw / DEG) % 360 + 360) % 360,
       pitch: p.pitch / DEG,
       scenario: this.scenario?.hud(),
@@ -700,6 +715,8 @@ export class Game {
   collidePlayer() {
     const p = this.player;
     const r = VALORANT.PLAYER_RADIUS;
+    // 벽이나 이동 범위에 막혀 속도가 깎였으면 true 를 돌려준다
+    let blocked = false;
     for (const w of this.walls) {
       if (w.y1 > 1.0) continue;
       const cx = Math.max(w.x1, Math.min(p.pos.x, w.x2));
@@ -714,7 +731,7 @@ export class Game {
           // 벽 방향 속도 성분 제거
           const nx = dx / d, nz = dz / d;
           const vn = p.vel.x * nx + p.vel.z * nz;
-          if (vn < 0) { p.vel.x -= vn * nx; p.vel.z -= vn * nz; }
+          if (vn < 0) { p.vel.x -= vn * nx; p.vel.z -= vn * nz; blocked = true; }
         } else {
           p.pos.z = w.z2 + r;
         }
@@ -722,10 +739,11 @@ export class Game {
     }
     const b = p.bounds;
     if (b) {
-      if (p.pos.x < b.x1) { p.pos.x = b.x1; p.vel.x = Math.max(0, p.vel.x); }
-      if (p.pos.x > b.x2) { p.pos.x = b.x2; p.vel.x = Math.min(0, p.vel.x); }
-      if (p.pos.z < b.z1) { p.pos.z = b.z1; p.vel.z = Math.max(0, p.vel.z); }
-      if (p.pos.z > b.z2) { p.pos.z = b.z2; p.vel.z = Math.min(0, p.vel.z); }
+      if (p.pos.x < b.x1) { p.pos.x = b.x1; if (p.vel.x < 0) blocked = true; p.vel.x = Math.max(0, p.vel.x); }
+      if (p.pos.x > b.x2) { p.pos.x = b.x2; if (p.vel.x > 0) blocked = true; p.vel.x = Math.min(0, p.vel.x); }
+      if (p.pos.z < b.z1) { p.pos.z = b.z1; if (p.vel.z < 0) blocked = true; p.vel.z = Math.max(0, p.vel.z); }
+      if (p.pos.z > b.z2) { p.pos.z = b.z2; if (p.vel.z > 0) blocked = true; p.vel.z = Math.min(0, p.vel.z); }
     }
+    return blocked;
   }
 }

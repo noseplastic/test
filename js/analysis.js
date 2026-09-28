@@ -90,6 +90,16 @@ export function analyzeFlick(path, radiusDeg) {
   };
 }
 
+// 플레이어 멈춤 기록 [{ ms, counter }] 요약
+export function summarizeStops(events) {
+  const e = events || [];
+  return {
+    stopSamples: e.length,
+    stopMs: median(e.map((x) => x.ms)),
+    counterRate: e.length ? e.filter((x) => x.counter).length / e.length : NaN,
+  };
+}
+
 export function summarize(engagements) {
   const shots = engagements.flatMap((e) => e.shots || []);
   const hits = shots.filter((s) => s.part);
@@ -219,6 +229,18 @@ export function buildAdvice(stats, ctx = {}) {
       add('warn', `이동 중 사격 ${pct(stats.movingShotRate)}`, '가끔 멈추기 전에 쏘고 있어요. 이동 키를 떼는 것과 클릭 타이밍을 분리해서 연습하세요.');
     } else if (ctx.mode === 'peek' || ctx.mode === 'strafe') {
       add('good', '멈춰서 쏘기 좋음', '거의 모든 사격이 정확도 구간(정지 상태)에서 나갔어요.');
+    }
+  }
+
+  // 멈추는 방식 (가감속)
+  if (ok(stats.stopMs) && stats.stopSamples >= 5) {
+    if (stats.counterRate < 0.5 && stats.stopMs > 80) {
+      add('warn', `멈춤 ${Math.round(stats.stopMs)}ms · 카운터 스트레이프 ${pct(stats.counterRate)}`,
+        '대부분 이동 키를 떼기만 해서 멈추고 있어요. 발로란트는 키를 떼면 약 110ms 뒤에야 정확해지지만, 반대 키를 짧게 누르면 약 55ms 만에 정확해집니다. D를 떼는 순간 A를 톡 누르세요.');
+    } else if (stats.stopMs <= 75) {
+      add('good', `멈춤 ${Math.round(stats.stopMs)}ms`, `풀 속도에서 정확 구간까지 빠르게 멈추고 있어요 (카운터 스트레이프 ${pct(stats.counterRate)}).`);
+    } else {
+      add('warn', `멈춤 ${Math.round(stats.stopMs)}ms`, '반대 키는 누르지만 너무 늦게/짧게 누르고 있어요. 이동 키를 떼는 것과 반대 키를 누르는 것을 거의 동시에 하세요. HUD 그래프에서 초록선이 가로선 아래로 빨리 내려갈수록 좋습니다.');
     }
   }
 

@@ -77,6 +77,49 @@ export function spreadFor(weapon, speed, sprayIndex) {
   return spread;
 }
 
+/**
+ * 플레이어가 풀 속도에서 정확도 구간까지 멈추는 데 걸린 시간 측정.
+ * 매 프레임 update() 를 부르면 멈춤이 끝난 프레임에 { ms, counter } 를 돌려준다.
+ * counter: 감속 중 이동 방향과 반대 키를 눌렀는지 (카운터 스트레이프)
+ */
+export class StopTracker {
+  constructor() {
+    this.lastFullT = NaN;
+    this.counter = false;
+    this.prevT = NaN;
+    this.prevSpeed = NaN;
+  }
+
+  // 벽에 부딪혀 멈춘 경우 등은 측정하지 않는다
+  cancel() {
+    this.lastFullT = NaN;
+  }
+
+  update(t, speed, runSpeed, threshold, opposing) {
+    const prevT = this.prevT, prevSpeed = this.prevSpeed;
+    this.prevT = t;
+    this.prevSpeed = speed;
+    if (speed >= runSpeed * 0.98) {
+      this.lastFullT = t;
+      this.counter = false;
+      return null;
+    }
+    if (!Number.isFinite(this.lastFullT)) return null;
+    if (opposing) this.counter = true;
+    if (speed <= threshold) {
+      // 프레임 사이에서 정확히 기준선을 지난 시점을 보간
+      let tCross = t;
+      if (Number.isFinite(prevSpeed) && prevSpeed > threshold && prevSpeed > speed) {
+        tCross = prevT + ((prevSpeed - threshold) / (prevSpeed - speed)) * (t - prevT);
+      }
+      const ev = { ms: (tCross - this.lastFullT) * 1000, counter: this.counter };
+      this.lastFullT = NaN;
+      return ev;
+    }
+    return null;
+  }
+}
+
 // 카운터 스트레이프로 멈추는 동안 이동하는 거리 (봇이 정확히 멈출 위치 계산용)
 export function counterStrafeDistance(speed, maxSpeed) {
   const brake = maxSpeed / VALORANT.STOP_TIME + maxSpeed / VALORANT.ACCEL_TIME;

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cm360, edpi, convertSens, sensFromCm360, recommendSensitivity } from '../js/sens.js';
-import { stepVelocity, maxSpeedFor, isAccurate, spreadFor, counterStrafeDistance } from '../js/movement.js';
-import { analyzeFlick, summarize, buildAdvice, median } from '../js/analysis.js';
+import { stepVelocity, maxSpeedFor, isAccurate, spreadFor, counterStrafeDistance, StopTracker } from '../js/movement.js';
+import { analyzeFlick, summarize, summarizeStops, buildAdvice, median } from '../js/analysis.js';
 import { StrafeAI, STRAFE_STOPS, ScriptedMover, buildPeekScript, makeRng } from '../js/bots.js';
 import { WEAPONS, VALORANT } from '../js/config.js';
 
@@ -47,9 +47,46 @@ test('counter-strafe reaches accuracy faster than releasing the key', () => {
   const accurate = (v) => isAccurate(Math.abs(v.x), WEAPONS.vandal);
   const counter = simulate({ x: max, z: 0 }, { x: -max, z: 0 }, max, 0.3).find((s) => accurate(s.v));
   const release = simulate({ x: max, z: 0 }, { x: 0, z: 0 }, max, 0.3).find((s) => accurate(s.v));
-  close(counter.t, 0.055, 0.01, 'counter-strafe');
-  close(release.t, 0.098, 0.01, 'release');
+  close(counter.t, 0.055, 0.006, 'counter-strafe');
+  close(release.t, 0.112, 0.006, 'release');
   assert.ok(counter.t < release.t);
+  // 키를 떼면 0.160초에 완전히 멈춘다
+  const full = simulate({ x: max, z: 0 }, { x: 0, z: 0 }, max, 0.3).find((s) => s.v.x === 0);
+  close(full.t, 0.16, 0.006, 'full stop');
+});
+
+test('StopTracker measures stop time and detects counter-strafes', () => {
+  const max = maxSpeedFor(WEAPONS.vandal, false);
+  const threshold = max * VALORANT.ACCURATE_SPEED_RATIO;
+  const run = (wishX) => {
+    const tr = new StopTracker();
+    const dt = 1 / 240;
+    let v = { x: 0, z: 0 };
+    let ev = null;
+    for (let i = 0; i < 240 && !ev; i++) {
+      const t = i * dt;
+      const w = t < 0.3 ? max : wishX; // 0.3초 달리다가 멈춤
+      const opposing = w * v.x < 0;
+      v = stepVelocity(v, { x: w, z: 0 }, max, dt);
+      ev = tr.update(t, Math.abs(v.x), max, threshold, opposing);
+    }
+    return ev;
+  };
+  const counter = run(-max);
+  const release = run(0);
+  assert.equal(counter.counter, true);
+  assert.equal(release.counter, false);
+  close(counter.ms, 55, 8);
+  close(release.ms, 112, 8);
+  // 벽에 막혀 멈춘 경우는 기록하지 않는다
+  const tr = new StopTracker();
+  tr.update(0, max, max, threshold, false);
+  tr.cancel();
+  assert.equal(tr.update(0.01, 0, max, threshold, false), null);
+
+  const sum = summarizeStops([counter, release, counter]);
+  assert.equal(sum.stopSamples, 3);
+  close(sum.counterRate, 2 / 3, 1e-9);
 });
 
 test('spread grows when moving and when spraying', () => {

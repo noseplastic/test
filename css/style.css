@@ -125,13 +125,22 @@ th { color: var(--muted); font-weight: 500; }
 #compass { position: absolute; top: 16px; right: 18px; font-size: 14px; background: #0009; padding: 5px 10px;
   border-radius: 6px; font-variant-numeric: tabular-nums; }
 #fps { position: absolute; top: 50px; right: 18px; font-size: 11px; color: #fffa; text-shadow: 0 1px 2px #000; }
-#speedBox { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); width: 240px; text-align: center;
+#speedBox { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); width: 260px; text-align: center;
   background: #0009; padding: 8px 12px; border-radius: 8px; }
 #speedText { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .speed-bar { position: relative; height: 6px; background: #ffffff22; border-radius: 3px; margin: 5px 0; }
 #speedFill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--good); border-radius: 3px; }
 #speedMark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; }
 #speedState { font-size: 12px; color: var(--good); }
+#speedCanvas { display: block; width: 100%; height: 55px; margin-top: 6px; }
+#graphLegend { font-size: 11px; color: #fffa; display: flex; gap: 10px; justify-content: center; }
+#graphLegend span::before { content: ''; display: inline-block; width: 10px; height: 2px; margin-right: 4px; vertical-align: middle; }
+#graphLegend .me::before { background: var(--good); }
+#graphLegend .bot::before { background: #7cc4ff; }
+#graphLegend .th::before { background: #fff8; }
+#speedBox.no-graph #speedCanvas, #speedBox.no-graph #graphLegend { display: none; }
+#speedState.stop-good { color: var(--good) !important; }
+#speedState.stop-warn { color: var(--warn) !important; }
 #speedBox.moving #speedFill { background: var(--bad); }
 #speedBox.moving #speedState { color: var(--bad); }
 #feedback { position: absolute; top: 58%; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: 700;

@@ -35,7 +35,7 @@ Python 이 있다면 `python -m http.server 5173` 도 됩니다. (ES 모듈이�
 | FOV | 수평 **103°** 고정 (창 비율에 맞춰 수직 FOV 계산) | `js/game.js` `resize()` |
 | 이동 속도 | 칼 6.75 m/s, 라이플·Sheriff 80% (5.4 m/s), Ghost 85%, 걷기 56% | `js/config.js` |
 | 정확도 | 최고 속도의 **30% 이하**일 때만 첫 발 정확도 | `js/movement.js` |
-| 가감속 | 0→최고속 0.18s, 키 떼면 약 0.1s, **카운터 스트레이프 약 55ms** 만에 정확도 구간 | `js/movement.js` |
+| 가감속 | 나·봇 공통. 키 떼면 0.160s 에 완전 정지(약 110ms 에 정확 구간), **카운터 스트레이프 약 55ms**, 0→최고속 0.155s | `js/config.js`, `js/movement.js` |
 | 히트박스/데미지 | 머리 = 눈높이, Vandal 헤드 160 / 몸 40 / 다리 34, 150HP | `js/config.js` |
 | 마우스 입력 | Pointer Lock **원시 입력**(`unadjustedMovement`) → Windows 감도·가속 무시 | `js/game.js` |
 

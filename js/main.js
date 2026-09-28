@@ -35,13 +35,65 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 // ─── HUD ───
 let feedbackTimer = 0;
 let hitTimer = 0;
+let stopText = '';
+let stopUntil = 0;
+let stopKind = '';
+
+// 최근 2초 속도 기록 (나 / 봇)
+const GRAPH_SECONDS = 2;
+const speedHistory = [];
+
+function drawSpeedGraph(s) {
+  const now = performance.now() / 1000;
+  speedHistory.push({ t: now, me: s.speed, bot: s.botSpeed, accurate: s.accurate });
+  while (speedHistory.length && now - speedHistory[0].t > GRAPH_SECONDS) speedHistory.shift();
+  if (!settings.speedGraph) return;
+  const c = $('speedCanvas');
+  const g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  const top = s.runSpeed * 1.05;
+  const X = (t) => W - ((now - t) / GRAPH_SECONDS) * W;
+  const Y = (v) => H - 4 - (v / top) * (H - 8);
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = '#ffffff55';
+  g.lineWidth = 2;
+  g.setLineDash([6, 6]);
+  g.beginPath(); g.moveTo(0, Y(s.threshold)); g.lineTo(W, Y(s.threshold)); g.stroke();
+  g.setLineDash([]);
+  // 봇
+  g.strokeStyle = '#7cc4ff';
+  g.lineWidth = 3;
+  g.beginPath();
+  let started = false;
+  for (const p of speedHistory) {
+    if (!Number.isFinite(p.bot)) { started = false; continue; }
+    if (!started) { g.moveTo(X(p.t), Y(p.bot)); started = true; } else g.lineTo(X(p.t), Y(p.bot));
+  }
+  g.stroke();
+  // 나 (정확 구간이면 초록, 아니면 빨강)
+  g.lineWidth = 4;
+  for (let i = 1; i < speedHistory.length; i++) {
+    const a = speedHistory[i - 1], b = speedHistory[i];
+    g.strokeStyle = b.accurate ? '#3ddc97' : '#ff5a5f';
+    g.beginPath(); g.moveTo(X(a.t), Y(a.me)); g.lineTo(X(b.t), Y(b.me)); g.stroke();
+  }
+}
+
 const hooks = {
+  onStop(ev) {
+    stopText = `멈춤 ${Math.round(ev.ms)}ms · ${ev.counter ? '카운터 스트레이프' : '키만 뗌'}`;
+    stopKind = ev.counter && ev.ms <= 75 ? 'stop-good' : 'stop-warn';
+    stopUntil = performance.now() + 1500;
+  },
   onHud(s) {
+    drawSpeedGraph(s);
     $('speedText').textContent = `${s.speed.toFixed(2)} m/s`;
     $('speedFill').style.width = `${Math.min(100, (s.speed / s.runSpeed) * 100)}%`;
     $('speedMark').style.left = `${(s.threshold / s.runSpeed) * 100}%`;
     $('speedBox').classList.toggle('moving', !s.accurate);
-    $('speedState').textContent = s.accurate ? (s.speed < 0.05 ? '정지 · 정확' : '감속 · 정확') : '이동 중 · 부정확';
+    const showStop = performance.now() < stopUntil;
+    $('speedState').textContent = showStop ? stopText : s.accurate ? (s.speed < 0.05 ? '정지 · 정확' : '감속 · 정확') : '이동 중 · 부정확';
+    $('speedState').className = showStop ? stopKind : '';
     $('compass').textContent = `${s.yaw.toFixed(1)}°  ${s.pitch >= 0 ? '↑' : '↓'}${Math.abs(s.pitch).toFixed(1)}°`;
     $('fps').textContent = `${Math.round(s.fps)} fps`;
     if (s.scenario) {
@@ -104,6 +156,7 @@ function applyCrosshair() {
   root.setProperty('--cross-size', `${settings.crossSize}px`);
   root.setProperty('--cross-gap', `${settings.crossGap}px`);
   document.querySelector('#crosshair .dot').style.display = settings.crossDot ? '' : 'none';
+  $('speedBox').classList.toggle('no-graph', !settings.speedGraph);
 }
 
 // ─── 메뉴 구성 ───
@@ -256,6 +309,10 @@ function showResult(res) {
   if (res.mode === 'flick') t('타겟당 평균', Number.isFinite(st.avgFlickMs) ? `${st.avgFlickMs}ms` : '-');
   else t('TTK (보인 뒤 킬)', Number.isFinite(st.ttkMs) ? `${Math.round(st.ttkMs)}ms` : '-');
   t('이동 중 사격', pct(st.movingShotRate));
+  if (st.stopSamples > 0) {
+    t('멈춤 시간 (중앙값)', `${Math.round(st.stopMs)}ms`);
+    t('카운터 스트레이프', pct(st.counterRate));
+  }
   t('크로스헤어 상하 오차', Number.isFinite(st.placementPitch) ? `${fmt(st.placementPitch, 1)}°` : '-');
   if (res.mode !== 'flick' && res.mode !== 'strafe') t('크로스헤어 좌우 오차', Number.isFinite(st.placementYaw) ? `${fmt(st.placementYaw, 1)}°` : '-');
   t('오버슈팅', pct(st.overshootRate));

@@ -1,6 +1,6 @@
 import { DIFFICULTY, VALORANT } from './config.js';
 import { StrafeAI, STRAFE_PROFILES, STRAFE_STOPS, ScriptedMover, buildPeekScript, PEEK_TYPES, makeRng, rand } from './bots.js';
-import { summarize, buildAdvice, analyzeFlick, mean } from './analysis.js';
+import { summarize, summarizeStops, buildAdvice, analyzeFlick, mean } from './analysis.js';
 import { recommendSensitivity, edpi } from './sens.js';
 import { DEG } from './game.js';
 
@@ -100,7 +100,7 @@ class Scenario {
   }
 
   baseResult(extra = {}) {
-    const stats = summarize(this.engagements);
+    const stats = { ...summarize(this.engagements), ...summarizeStops(this.game.stopEvents) };
     stats.wastedShots = this.wastedShots;
     const s = this.settings;
     const ctx = { mode: this.key, edpi: edpi(s.sens, s.dpi), duel: this.key === 'strafe' && !!s.strafeDuel };

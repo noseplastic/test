@@ -27,6 +27,8 @@
       <div id="speedText">0.00 m/s</div>
       <div class="speed-bar"><div id="speedFill"></div><div id="speedMark"></div></div>
       <div id="speedState">정지 · 정확</div>
+      <canvas id="speedCanvas" width="480" height="110"></canvas>
+      <div id="graphLegend"><span class="me">나</span> <span class="bot">봇</span> <span class="th">정확 구간</span></div>
     </div>
     <div id="feedback"></div>
     <div id="flash"></div>
@@ -114,6 +116,7 @@
           <label>선 길이 <input id="crossSize" type="range" min="0" max="16" step="1" /></label>
           <label>간격 <input id="crossGap" type="range" min="0" max="12" step="1" /></label>
           <label class="check"><input id="crossDot" type="checkbox" /> 중앙 점</label>
+          <label class="check"><input id="speedGraph" type="checkbox" /> 속도 그래프 (나·봇 가감속)</label>
         </div>
       </section>
 
@@ -166,7 +169,8 @@
           <li><b>원시 입력</b>: Chrome/Edge에서는 포인터 락의 원시 입력을 사용해 Windows 감도·가속이 적용되지 않습니다. 지원하지 않으면 Windows 포인터 속도 6/11, "포인터 정확도 향상" 끄기가 필요합니다.</li>
           <li><b>검증</b>: 상단 나침반 각도로 확인할 수 있습니다. 인게임에서 마우스를 N cm 밀어 180° 돌았다면 여기서도 같은 거리에 180°가 나와야 합니다.</li>
           <li><b>이동</b>: 칼 6.75 m/s 기준, 라이플 80% (5.4 m/s), 걷기 56%. 최고 속도의 30% 이하일 때만 첫 발이 정확합니다 (HUD 속도 바의 표시선).</li>
-          <li><b>카운터 스트레이프</b>: 반대 방향 키를 누르면 감속이 합쳐져 약 55ms 만에 정확도 구간에 들어갑니다. 키만 떼면 약 100ms.</li>
+          <li><b>가감속</b>: 나와 봇 모두 같은 물리를 씁니다. 키를 떼면 0.16초에 완전히 멈추고(약 110ms에 정확 구간), 반대 키를 누르면(카운터 스트레이프) 약 55ms 만에 정확 구간에 들어갑니다. 0→최고 속도는 약 0.155초.</li>
+          <li><b>속도 그래프</b>: 화면 아래 그래프에 최근 2초간 나(초록=정확/빨강=부정확)와 봇(하늘색)의 속도가 그려집니다. 가로선 아래가 정확 구간입니다. 풀 속도에서 멈출 때마다 걸린 시간과 카운터 스트레이프 여부가 표시됩니다.</li>
           <li><b>히트박스</b>: 머리 1발(Vandal 160, Phantom 156), 방어구 포함 150HP 기준.</li>
         </ul>
         <h3>모드 설명</h3>
