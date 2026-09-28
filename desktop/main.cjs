@@ -262,6 +262,7 @@ ipcMain.on('overlay:size', (e, w, h) => {
 // ValorantReplayParser 의 CliReader.exe (CI 에서 빌드해 resources/parser 에 포함) 로 NDJSON 을 만든다.
 // 게임이 저장한 리플레이 파일만 읽고, 게임 실행 중인 프로세스에는 접근하지 않는다.
 const exportedFiles = new Set();
+const PARSER_TAG = '2';
 
 function demosDir() {
   return path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'VALORANT', 'Saved', 'Demos');
@@ -308,7 +309,8 @@ ipcMain.handle('replay:export', async (_e, vrfPath) => {
   if (!exe) return { error: '리플레이 해석기(CliReader.exe)가 앱에 포함되어 있지 않습니다.' };
   const st = fs.statSync(vrfPath);
   const base = path.basename(vrfPath, path.extname(vrfPath)).replace(/[^\w.-]/g, '_');
-  const out = path.join(app.getPath('userData'), 'replays', `${base}-${Math.round(st.mtimeMs)}`);
+  // 해석기가 바뀌면 다시 해석하도록 폴더 이름에 버전 표시
+  const out = path.join(app.getPath('userData'), 'replays', `${base}-${Math.round(st.mtimeMs)}-p${PARSER_TAG}`);
   const events = path.join(out, 'events.ndjson');
   const movement = path.join(out, 'movement.ndjson');
   if (!(fs.existsSync(events) && fs.existsSync(movement))) {
@@ -324,7 +326,11 @@ ipcMain.handle('replay:export', async (_e, vrfPath) => {
   }
   exportedFiles.add(events);
   exportedFiles.add(movement);
-  return { name: path.basename(vrfPath), events, movement };
+  let manifest = null;
+  try {
+    manifest = JSON.parse(await fs.promises.readFile(path.join(out, 'manifest.json'), 'utf8'));
+  } catch { /* 없으면 맵 이름 없이 */ }
+  return { name: path.basename(vrfPath), events, movement, manifest };
 });
 
 // 해석 결과 파일만 조각으로 읽을 수 있다
@@ -350,6 +356,17 @@ ipcMain.handle('maps:get', async (_e, code) => {
   } catch {
     return null;
   }
+});
+
+// offangle 리포트 데이터 (브라우저 CORS 없이 메인 프로세스에서 받음). offangle.pro 주소만 허용
+ipcMain.handle('offangle:fetch', async (_e, url) => {
+  const u = new URL(String(url));
+  if (u.protocol !== 'https:' || u.hostname !== 'offangle.pro' || !/^\/match\/[0-9a-f-]{36}\/__data\.json$/i.test(u.pathname)) {
+    throw new Error('offangle 매치 데이터 주소가 아닙니다');
+  }
+  const r = await fetch(u, { headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.text();
 });
 
 app.on('second-instance', showTrainer);

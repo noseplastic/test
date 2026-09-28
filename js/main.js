@@ -7,6 +7,7 @@ import { buildCoachCard } from './coach.js';
 import { validateResult } from './match/validate.js';
 import { readCompact, fileChunks, buildReplayModel, analyzeReplay, guessMe } from './match/replay.js';
 import { loadMap, checkMapFit } from './match/visibility.js';
+import { offangleDataUrl, parseOffangleData, compareWithOffangle } from './match/offangle.js';
 import { flickClass } from './match/engine.js';
 
 const $ = (id) => document.getElementById(id);
@@ -463,10 +464,12 @@ function saveSession() {
 let replayModel = null;
 let replayName = '';
 let replayMap = null;
+let replayLast = null;
+let offangleRoot = null;
 
 const setReplayStatus = (text) => { $('replayStatus').textContent = text; };
 
-async function loadReplay(eventsChunks, movementChunks, name) {
+async function loadReplay(eventsChunks, movementChunks, name, manifest = null) {
   $('replayResult').innerHTML = '';
   show('replayPlayerRow', false);
   replayName = name;
@@ -475,7 +478,7 @@ async function loadReplay(eventsChunks, movementChunks, name) {
     const events = await readCompact(eventsChunks);
     setReplayStatus('이동 기록 읽는 중… (큰 파일은 시간이 걸립니다)');
     const movement = await readCompact(movementChunks, (n) => setReplayStatus(`이동 기록 읽는 중… ${Math.round(n / 1000)}k 줄`));
-    replayModel = buildReplayModel(events, movement);
+    replayModel = buildReplayModel(events, movement, manifest);
   } catch (err) {
     setReplayStatus(`읽기 실패: ${err.message || err}`);
     return;
@@ -508,13 +511,42 @@ function runReplayAnalysis() {
   const subject = replayModel.players.get(me)?.subject;
   if (subject) store.set('vat.replaySubject', subject);
   const res = analyzeReplay(replayModel, me, replayMap ? { map: replayMap } : {});
+  replayLast = { res, me };
   renderReplay(res);
+  show('replayOffangleRow');
+  renderOffangle();
   if (res.engagements.length) {
     coachSessions.unshift({ modeName: '실전 리플레이', date: Date.now(), advice: res.advice.map(({ level, title, key }) => ({ level, title, key })) });
     coachSessions = coachSessions.slice(0, 5);
     store.set('vat.coachSessions', coachSessions);
     pushCoach();
   }
+}
+
+// ─── offangle 비교 ───
+async function loadOffangle() {
+  $('offangleResult').innerHTML = '<p class="muted">offangle 리포트 불러오는 중…</p>';
+  try {
+    const { url } = offangleDataUrl($('offangleUrl').value.trim());
+    const text = window.vatDesktop?.fetchOffangle
+      ? await window.vatDesktop.fetchOffangle(url)
+      : await fetch(url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
+    offangleRoot = parseOffangleData(text);
+    renderOffangle();
+  } catch (err) {
+    $('offangleResult').innerHTML = `<p class="muted">불러오기 실패: ${escapeHtml(err.message || String(err))}${window.vatDesktop ? '' : ' — 브라우저에서는 사이트 정책으로 막힐 수 있습니다. 링크 뒤에 /__data.json 을 붙인 주소를 저장해서 파일로 선택하세요.'}</p>`;
+  }
+}
+
+function renderOffangle() {
+  if (!offangleRoot || !replayLast || !replayModel) return;
+  const c = compareWithOffangle(offangleRoot, replayModel, replayLast.res, replayLast.me);
+  if (c.error) { $('offangleResult').innerHTML = `<p class="muted">${escapeHtml(c.error)}</p>`; return; }
+  $('offangleResult').innerHTML = `<h3>offangle 과 비교 · ${escapeHtml(c.player)} · ${escapeHtml(c.map || '')}</h3>
+    <table><tr><th>항목</th><th>우리 앱</th><th>offangle</th><th>참고</th></tr>
+    ${c.rows.map((r) => `<tr><td>${escapeHtml(r.label)}</td><td>${escapeHtml(r.ours)}</td><td>${escapeHtml(r.theirs)}</td><td class="muted">${escapeHtml(r.note)}</td></tr>`).join('')}</table>
+    ${c.opponents.length ? `<p class="muted">상대별 킬–데스</p><table><tr><th>상대</th><th>우리 앱</th><th>offangle</th></tr>
+      ${c.opponents.map((o) => `<tr><td>${escapeHtml(o.agent)}</td><td>${o.ours}</td><td>${o.theirs}</td></tr>`).join('')}</table>` : ''}`;
 }
 
 function useMap(text) {
@@ -538,7 +570,8 @@ function renderReplay(res) {
   const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
   const tiles = [
     ['교전', `${st.engagements}`],
-    ['킬 / 데스', `${st.kills} / ${st.deaths}`],
+    ['킬 / 데스', `${st.killsTotal} / ${st.deathsTotal}`],
+    ['소총 첫 발 명중률', Number.isFinite(st.firstShotAcc) ? `${pct(st.firstShotAcc)} (${st.firstShotSamples}발)` : '-'],
     ['명중률 (실제)', pct(st.accuracy)],
     ['헤드샷 비율 (실제)', pct(st.headshotRate)],
     ['이동 중 사격', pct(st.movingShotRate)],
@@ -559,7 +592,7 @@ function renderReplay(res) {
     const result = e.result === 'kill' ? '킬' : e.result === 'death' ? (e.noShot ? '사망 (못 쏨)' : '사망') : '-';
     const place = `${fmt(Math.abs(e.placement.ex), 1)}° / ${fmt(Math.abs(e.placement.ey), 1)}°`;
     return `<tr><td>${mmss(e.appearT)}</td><td>${name(e.target)}</td><td>${result}</td><td>${place}</td>
-      <td>${Number.isFinite(e.firstShotT) ? Math.round((e.firstShotT - e.appearT) * 1000) + 'ms' : '-'}</td>
+      <td>${Number.isFinite(e.firstShotT) && Number.isFinite(e.onsetT) ? Math.round((e.firstShotT - e.onsetT) * 1000) + 'ms' : '-'}</td>
       <td>${shots ? `${hits}/${shots} (헤드 ${heads})` : '-'}</td><td>${shots ? e.shots.filter((x) => x.moving).length : '-'}</td>
       <td>${fl === 'over' ? '오버' : fl === 'under' ? '언더' : fl === 'clean' ? '정확' : '-'}</td>
       <td>${e.deathErr ? fmt(Math.hypot(e.deathErr.ex, e.deathErr.ey), 0) + '°' : ''}</td></tr>`;
@@ -605,7 +638,7 @@ async function analyzeVrf(path) {
   $('replayResult').innerHTML = '';
   const out = await desk.exportReplay(path);
   if (out.error) { setReplayStatus(`해석 실패: ${out.error}`); return; }
-  await loadReplay(desktopFileChunks(out.events), desktopFileChunks(out.movement), out.name);
+  await loadReplay(desktopFileChunks(out.events), desktopFileChunks(out.movement), out.name, out.manifest || null);
 }
 
 // 데스크톱 앱: 메인 프로세스에서 파일을 4MB 씩 받아 문자열로
@@ -632,14 +665,24 @@ function initReplay() {
       if (path) analyzeVrf(path);
     });
   }
-  $('replayFiles').addEventListener('change', () => {
+  $('replayFiles').addEventListener('change', async () => {
     const files = [...$('replayFiles').files];
     const ev = files.find((f) => /events/i.test(f.name));
     const mv = files.find((f) => /movement/i.test(f.name));
-    if (!ev || !mv) { setReplayStatus('events.ndjson 과 movement.ndjson 두 파일을 함께 선택하세요.'); return; }
-    loadReplay(fileChunks(ev), fileChunks(mv), ev.name.replace(/events.*$/i, '') || '리플레이');
+    const mf = files.find((f) => /manifest/i.test(f.name));
+    if (!ev || !mv) { setReplayStatus('events.ndjson 과 movement.ndjson 두 파일을 함께 선택하세요 (manifest.json 은 선택).'); return; }
+    const manifest = mf ? await mf.text().then((t) => JSON.parse(t)).catch(() => null) : null;
+    loadReplay(fileChunks(ev), fileChunks(mv), ev.name.replace(/events.*$/i, '') || '리플레이', manifest);
   });
   $('replayMe').addEventListener('change', runReplayAnalysis);
+  $('offangleGo').addEventListener('click', loadOffangle);
+  $('offangleFile').addEventListener('change', async () => {
+    const f = $('offangleFile').files[0];
+    if (!f) return;
+    try { offangleRoot = parseOffangleData(await f.text()); renderOffangle(); } catch (err) {
+      $('offangleResult').innerHTML = `<p class="muted">파일 오류: ${escapeHtml(err.message)}</p>`;
+    }
+  });
   $('replayMap').addEventListener('change', async () => {
     const f = $('replayMap').files[0];
     if (!f || !replayModel) return;

@@ -13,6 +13,9 @@ test('replay model links players, characters and agents', () => {
   assert.equal(model.shots.length, 3);
   assert.equal(model.damage.filter((d) => d.region === 'head').length, 3);
   assert.equal(model.damage[0].victimPs, 200);
+  // 킬 RPC 가 직전 데미지 기록을 사망으로 확정한다
+  const death = model.damage.find((d) => d.victimPs === 100 && d.killed);
+  assert.ok(death && !death.killOnly && death.attackerPs === 400);
   // 팀원 300 은 아무와도 교전하지 않았지만 적 추정에서 제외되어야 함
   assert.deepEqual(inferEnemies(model, 100).sort(), [200, 400]);
 });
@@ -48,6 +51,8 @@ test('death while facing away is reported with the aim error to the killer', () 
   // 킬러는 왼쪽(+y, yaw 90°), 나는 -90° 를 보고 있음 → 180° 차이
   close(Math.abs(death.deathErr.ex), 180, 1);
   assert.equal(res.stats.noShotDeaths, 1);
+  assert.equal(res.stats.killsTotal, 3);
+  assert.equal(res.stats.deathsTotal, 1);
 });
 
 test('view convention detects a flipped pitch sign in movement data', () => {
@@ -72,5 +77,26 @@ test('streaming reader keeps only the needed events across chunk boundaries', as
   async function* chunks() { for (let i = 0; i < text.length; i += 7) yield text.slice(i, i + 7); }
   const out = await readCompact(chunks());
   assert.equal(out.length, parseNdjson(r.events).length);
-  assert.ok(out.every((o) => o.type !== 'rpc_received'));
+  assert.ok(out.every((o) => o.type !== 'rpc_received' || /Damage|Killed/.test(o.function)));
+});
+
+test('moves batched into one packet are spread over the time since the previous packet', async () => {
+  const { spreadBatches } = await import('../js/match/replay.js');
+  const arr = [{ t: 1.0 }, { t: 1.024, m: 0 }, { t: 1.024, m: 1 }, { t: 1.024, m: 2 }];
+  spreadBatches(arr);
+  assert.deepEqual(arr.map((x) => Math.round(x.t * 1000)), [1000, 1008, 1016, 1024]);
+});
+
+test('map name comes from the manifest level names', () => {
+  const r = fakeReplay();
+  const model = buildReplayModel(parseNdjson(r.events), parseNdjson(r.movement), { level_names: [{ name: '/Game/Maps/Ascent/Ascent', time_ms: 0 }] });
+  assert.equal(model.mapName, 'Ascent');
+});
+
+test('a kill RPC without any damage record still counts as a death', () => {
+  const r = fakeReplay();
+  const events = parseNdjson(r.events).filter((e) => !(e.type === 'rpc_received' && e.time_ms === 13400));
+  const model = buildReplayModel(events, parseNdjson(r.movement));
+  const death = model.damage.find((d) => d.victimPs === 100 && d.killed);
+  assert.ok(death && death.killOnly && death.attackerPs === 400);
 });

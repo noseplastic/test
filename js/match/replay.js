@@ -22,6 +22,38 @@ const RAD = Math.PI / 180;
 const wrapDeg = (a) => ((((a + 180) % 360) + 360) % 360) - 180;
 const pitchDeg = (p) => (p > 180 ? p - 360 : p);
 
+function damageRecord(t, actor, p) {
+  return {
+    t,
+    attackerPs: p.DamagerPlayerState || p.KillCreditPlayerState || null,
+    victimCands: [actor, p.Character].filter(Boolean),
+    region: regionOf(p),
+    bone: p.DamagedBone || null,
+    dealt: num(p.DamageDealt) ?? num(p.DamageTaken) ?? 0,
+    killed: !!p.DamageKilledTarget,
+  };
+}
+
+// 한 패킷에 여러 이동이 묶여 같은 시각으로 오므로, 직전 패킷 시각부터 고르게 나눈다 (최대 100ms)
+export function spreadBatches(arr) {
+  arr.sort((a, b) => a.t - b.t || (a.u ?? 0) - (b.u ?? 0) || (a.m ?? 0) - (b.m ?? 0));
+  let i = 0;
+  let prevT = -Infinity;
+  while (i < arr.length) {
+    let j = i;
+    while (j + 1 < arr.length && arr[j + 1].t === arr[i].t) j++;
+    const n = j - i + 1;
+    if (n > 1) {
+      const t = arr[i].t;
+      const span = Math.min(0.1, Number.isFinite(prevT) ? t - prevT : 0.1);
+      for (let k = 0; k < n; k++) arr[i + k].t = t - span + (span * (k + 1)) / n;
+    }
+    prevT = arr[j].t;
+    i = j + 1;
+  }
+  return arr;
+}
+
 // 요원 코드명 → 이름 (리플레이의 캐릭터 경로 /Game/Characters/<코드명>/...)
 export const AGENTS = {
   Aggrobot: 'Gekko', BountyHunter: 'Fade', Breach: 'Breach', Cable: 'Deadlock', Cashew: 'Tejo', Clay: 'Raze',
@@ -69,6 +101,7 @@ function weaponKey(eq) {
 // ─── 큰 NDJSON 스트리밍 읽기 ───
 // 한 경기 movement.ndjson 은 수백 MB 가 될 수 있어 줄 단위로 읽으면서 필요한 필드만 남긴다.
 const KEEP_GROUP = /BombPlayerState|OwnerExclusivePlayerInfo|MulticastNotifyDamage/;
+const KEEP_RPC = /MulticastNotifyDamage|MulticastNotifyKilledEnemy/;
 
 export function compactReplayLine(o) {
   switch (o?.type) {
@@ -76,7 +109,13 @@ export function compactReplayLine(o) {
       return {
         type: o.type, time_ms: o.time_ms, shooter_character_net_guid: o.shooter_character_net_guid,
         position: o.position, yaw: o.yaw, pitch: o.pitch, velocity: o.velocity, error_sentinel: o.error_sentinel,
+        update_index: o.update_index, move_index: o.move_index, timestamp: o.timestamp,
       };
+    case 'rpc_received': {
+      // 데미지·킬은 RPC 로 온다 (DamageableComponent:MulticastNotifyDamage_*, ShooterCharacter:MulticastNotifyKilledEnemy)
+      const fn = `${o.function_export_path || ''} ${o.function_name || ''}`;
+      return KEEP_RPC.test(fn) ? { type: o.type, time_ms: o.time_ms, actor_net_guid: o.actor_net_guid, function: fn, payload: o.payload } : null;
+    }
     case 'valorant_shot_received': {
       const s = o.shot || {};
       return {
@@ -156,13 +195,14 @@ export async function* fileChunks(file) {
  * NDJSON 이벤트 → 경기 모델
  * players: psGuid → { ps, subject, agent, characters:Set }
  */
-export function buildReplayModel(events, movement) {
+export function buildReplayModel(events, movement, manifest = null) {
   const players = new Map();
   const charToPs = new Map();
   const charAgent = new Map();
   const moves = new Map();
   const shots = [];
   const damage = [];
+  const kills = [];
   const smokes = new Map();
   const closed = new Map();
   let ownerHint = null;
@@ -204,14 +244,13 @@ export function buildReplayModel(events, movement) {
       } else if (path.includes('OwnerExclusivePlayerInfo')) {
         if (p.Owner) ownerHint = p.Owner;
       } else if (path.includes('MulticastNotifyDamage')) {
-        damage.push({
-          t,
-          attackerPs: p.DamagerPlayerState || p.KillCreditPlayerState || null,
-          victimChar: p.Character || e.actor_net_guid || null,
-          region: regionOf(p),
-          dealt: num(p.DamageDealt) ?? num(p.DamageTaken) ?? 0,
-          killed: !!p.DamageKilledTarget || p.AliveAfterDamage === false,
-        });
+        damage.push(damageRecord(t, e.actor_net_guid, p));
+      }
+    } else if (e.type === 'rpc_received' && e.payload) {
+      const fn = e.function || `${e.function_export_path || ''} ${e.function_name || ''}`;
+      if (fn.includes('MulticastNotifyDamage')) damage.push(damageRecord(t, e.actor_net_guid, e.payload));
+      else if (fn.includes('KilledEnemy') && e.payload.KilledCharacter) {
+        kills.push({ t, killerChar: e.payload.KillerCharacter || e.actor_net_guid, victimChar: e.payload.KilledCharacter });
       }
     } else if (e.type === 'valorant_shot_received' && e.shot) {
       const s = e.shot;
@@ -236,16 +275,39 @@ export function buildReplayModel(events, movement) {
     const p = vec(m.position);
     if (!ch || !p) continue;
     if (!moves.has(ch)) moves.set(ch, []);
-    moves.get(ch).push({ t: m.time_ms / 1000, ...p, yaw: m.yaw, pitch: pitchDeg(m.pitch), vel: vec(m.velocity), state: m.movement_state });
+    moves.get(ch).push({
+      t: m.time_ms / 1000, ...p, yaw: m.yaw, pitch: pitchDeg(m.pitch), vel: vec(m.velocity), state: m.movement_state,
+      u: m.update_index, m: m.move_index,
+    });
   }
-  for (const arr of moves.values()) arr.sort((a, b) => a.t - b.t);
+  for (const arr of moves.values()) spreadBatches(arr);
   for (const [ch, ps] of charToPs) if (charAgent.has(ch)) player(ps).agent ||= charAgent.get(ch);
   shots.sort((a, b) => a.t - b.t);
   damage.sort((a, b) => a.t - b.t);
-  for (const d of damage) d.victimPs = charToPs.get(d.victimChar) ?? null;
+  // 피해자: 데미지를 받은 컴포넌트의 액터(캐릭터) 또는 payload 의 캐릭터 중 플레이어로 연결되는 것
+  for (const d of damage) {
+    const cand = d.victimCands.map((c) => charToPs.get(c)).filter((ps) => ps && ps !== d.attackerPs);
+    d.victimPs = cand[0] ?? null;
+    d.victimChar = d.victimCands.find((c) => charToPs.get(c) === d.victimPs) ?? null;
+  }
+  // 킬 RPC 로 사망 확정 (데미지 기록이 없으면 명중 없이 킬 기록만 추가)
+  for (const k of kills) {
+    const killerPs = charToPs.get(k.killerChar) ?? null;
+    const victimPs = charToPs.get(k.victimChar) ?? null;
+    if (!victimPs) continue;
+    const d = damage.find((x) => x.victimPs === victimPs && Math.abs(x.t - k.t) < 0.5 && (!killerPs || x.attackerPs === killerPs));
+    if (d) d.killed = true;
+    else damage.push({ t: k.t, attackerPs: killerPs, victimPs, victimChar: k.victimChar, victimCands: [], region: null, dealt: 0, killed: true, killOnly: true });
+  }
+  damage.sort((a, b) => a.t - b.t);
 
   for (const sm of smokes.values()) if (closed.has(sm.guid) && closed.get(sm.guid) > sm.t0) sm.t1 = closed.get(sm.guid);
 
+  // 맵: 매니페스트의 레벨 이름(패치된 해석기) → 없으면 액터 경로에서 추정
+  for (const l of manifest?.level_names || []) {
+    const mm = String(l.name || l).match(/\/Game\/Maps\/([A-Za-z0-9]+)/);
+    if (mm) mapHints.set(mm[1], (mapHints.get(mm[1]) || 0) + 1000);
+  }
   const mapCode = [...mapHints].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   return {
     players, charToPs, moves, shots, damage, smokes: [...smokes.values()], ownerHint,
@@ -349,7 +411,7 @@ export function analyzeReplay(model, me, opts = {}) {
   const myShots = model.shots.filter((s) => s.ps === me);
   // 내 샷 → 명중 기록 (0.2초 이내 내가 준 데미지, 한 번만 연결)
   const usedHits = new Set();
-  const hitOf = (shot) => model.damage.find((d) => d.attackerPs === me && d.t >= shot.t - 0.02 && d.t <= shot.t + 0.2 && !usedHits.has(d));
+  const hitOf = (shot) => model.damage.find((d) => d.attackerPs === me && !d.killOnly && d.t >= shot.t - 0.02 && d.t <= shot.t + 0.2 && !usedHits.has(d));
 
   // 보정용: 머리에 맞은 샷과 그 적의 위치
   const calPairs = [];
@@ -466,10 +528,13 @@ export function analyzeReplay(model, me, opts = {}) {
     let peak = 0;
     for (let i = 1; i < speed.length; i++) if (speed[i] > speed[peak]) peak = i;
     let onset = 0;
+    let onsetFound = false;
     if (speed[peak] > 30) {
       const quiet = Math.max(15, speed[peak] * 0.1);
       onset = peak;
       while (onset > 0 && !(speed[onset] < quiet && speed[onset - 1] < quiet)) onset--;
+      // 창 맨 앞까지 계속 움직이고 있었다면 반응 시작을 찾은 게 아니다
+      onsetFound = onset > 0 || Number.isFinite(appearT);
     }
     // 보인 순간을 알면 그때의 크로스헤어 오차, 모르면 반응을 시작한 순간의 오차
     const known = Number.isFinite(appearT);
@@ -505,6 +570,7 @@ export function analyzeReplay(model, me, opts = {}) {
         targetStopped: Number.isFinite(targetSpeed) ? targetSpeed <= maxSpeedFor(w, false) * VALORANT.ACCURATE_SPEED_RATIO : undefined,
         relSpeed: e && e0 ? Math.hypot(e.ex - e0.ex, e.ey - e0.ey) / 0.03 : NaN,
         weapon: s.weapon,
+        rifle: /rifle/i.test(s.category || '') || s.weapon === 'vandal' || s.weapon === 'phantom',
       };
     });
 
@@ -512,7 +578,7 @@ export function analyzeReplay(model, me, opts = {}) {
       mode: 'replay',
       target: g.target,
       appearT: known ? path[0].t : path[onset].t,
-      onsetT: path[onset].t,
+      onsetT: onsetFound ? path[onset].t : NaN,
       appearKnown: known,
       firstShotT: g.shots.length ? g.firstT : NaN,
       endT: kill ? kill.t : g.death ? g.death.t : g.lastT,
@@ -548,7 +614,14 @@ export function analyzeReplay(model, me, opts = {}) {
   stats.reactionMs = median(react);
   stats.reactionSamples = react.length;
   stats.appearKnownRate = out.length ? out.filter((e) => e.appearKnown).length / out.length : NaN;
-  stats.aimTimeMs = median(out.filter((e) => Number.isFinite(e.firstShotT)).map((e) => (e.firstShotT - e.onsetT) * 1000));
+  stats.aimTimeMs = median(out.filter((e) => Number.isFinite(e.firstShotT) && Number.isFinite(e.onsetT)).map((e) => (e.firstShotT - e.onsetT) * 1000));
+  // 경기 전체 킬/데스 (교전으로 묶이지 않은 킬 포함)
+  stats.killsTotal = model.damage.filter((d) => d.attackerPs === me && d.killed && d.victimPs !== me).length;
+  stats.deathsTotal = model.damage.filter((d) => d.victimPs === me && d.killed).length;
+  // 소총 첫 발 명중률 (연사 첫 발만)
+  const firsts = out.flatMap((e) => e.shots).filter((x) => x.spray === 0 && x.rifle);
+  stats.firstShotAcc = firsts.length ? firsts.filter((x) => x.part).length / firsts.length : NaN;
+  stats.firstShotSamples = firsts.length;
   Object.assign(stats, trackingBias(out));
   const shotsAll = out.flatMap((e) => e.shots);
   stats.aimMovingShotRate = shotsAll.length ? shotsAll.filter((s) => s.relSpeed > 15).length / shotsAll.length : NaN;

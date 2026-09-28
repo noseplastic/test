@@ -1,0 +1,21 @@
+diff --git a/src/CliReader/JsonExport/ReplayExportManifestWriter.cs b/src/CliReader/JsonExport/ReplayExportManifestWriter.cs
+index 64535a2..b46badf 100644
+--- a/src/CliReader/JsonExport/ReplayExportManifestWriter.cs
++++ b/src/CliReader/JsonExport/ReplayExportManifestWriter.cs
+@@ -68,6 +68,16 @@ internal sealed class ReplayExportManifestWriter
+         writer.WriteString("replay_version", $"{version.Major}.{version.Minor}.{version.Patch}");
+         writer.WriteNumber("replay_changelist", version.Changelist);
+         writer.WriteNumber("duration_ms", result.Metadata.ReplayInfo.LengthInMs);
++        writer.WriteStartArray("level_names");
++        foreach (var (levelName, timeInMs) in result.Metadata.ReplayHeader.LevelNamesAndTimes)
++        {
++            writer.WriteStartObject();
++            writer.WriteString("name", levelName);
++            writer.WriteNumber("time_ms", timeInMs);
++            writer.WriteEndObject();
++        }
++
++        writer.WriteEndArray();
+         writer.WriteString("parse_profile", profileName);
+         writer.WriteString("parser_assembly", parserAssembly.GetName().Name);
+         writer.WriteString("parser_version", ParserVersion(parserAssembly));

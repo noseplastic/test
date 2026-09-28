@@ -31,6 +31,8 @@ jobs:
         run: |
           git clone https://github.com/michel-giehl/ValorantReplayParser parser-src
           git -C parser-src checkout ${{ env.PARSER_COMMIT }}
+          # 매니페스트에 맵(레벨) 이름 추가
+          git -C parser-src apply ../tools/parser-patches/manifest-level-names.patch
 
       - uses: actions/setup-dotnet@v4
         with:

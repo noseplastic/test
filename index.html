@@ -171,7 +171,7 @@
         </div>
         <div id="replayBrowser">
           <p class="muted">브라우저에서는 <a href="https://github.com/michel-giehl/ValorantReplayParser" target="_blank" rel="noopener">ValorantReplayParser</a> 의
-            <code>CliReader export 경기.vrf -o 폴더</code> 로 만든 <b>events.ndjson</b> 과 <b>movement.ndjson</b> 두 파일을 함께 선택하세요. Windows 앱은 자동으로 처리합니다.</p>
+            <code>CliReader export 경기.vrf -o 폴더</code> 로 만든 <b>events.ndjson</b>, <b>movement.ndjson</b> (+ 선택: manifest.json) 을 함께 선택하세요. Windows 앱은 자동으로 처리합니다.</p>
           <label class="file-pick">파일 선택 <input id="replayFiles" type="file" multiple accept=".ndjson,.json" /></label>
         </div>
         <p id="replayStatus" class="muted"></p>
@@ -182,6 +182,14 @@
           </label>
         </div>
         <p id="replayMapStatus" class="muted"></p>
+        <div id="replayOffangleRow" class="grid form" hidden>
+          <label>offangle 리포트와 비교 (같은 경기 링크)
+            <input id="offangleUrl" type="url" placeholder="https://offangle.pro/match/..." />
+          </label>
+          <div class="conv-out"><button id="offangleGo">비교</button>
+            <label class="file-pick">또는 __data.json <input id="offangleFile" type="file" accept=".json" /></label></div>
+        </div>
+        <div id="offangleResult"></div>
         <div id="replayResult"></div>
       </section>
 

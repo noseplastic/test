@@ -55,9 +55,13 @@ export function fakeReplay() {
   for (const f of fights) {
     const t = f + 0.4;
     events.push({ type: 'valorant_shot_received', time_ms: t * 1000, shot: { firing_player_state: 100, location: eyeOf(me), rotation: { pitch: 0, yaw: ue(yawAt(t)), roll: 0 }, equippable: { name: 'Vandal', category: 'rifle' } } });
-    events.push({ type: 'export_group_received', time_ms: t * 1000 + 30, actor_net_guid: 2001, export_group_path: '/Script/ShooterGame.DamageableComponent:MulticastNotifyDamage_Point', payload: { DamagerPlayerState: 100, Character: 2001, RegionalDamage: 'regional_damage_headshot', DamageDealt: 160, DamageKilledTarget: true } });
+    // 실제 해석기는 데미지를 RPC 로 내보낸다 (actor = 피해자 캐릭터)
+    events.push({ type: 'rpc_received', time_ms: t * 1000 + 30, actor_net_guid: 2001, function_export_path: '/Script/ShooterGame.DamageableComponent:MulticastNotifyDamage_Point', payload: { DamagerPlayerState: 100, RegionalDamage: 'regional_damage_headshot', DamagedBone: 'Head', DamageDealt: 160, DamageKilledTarget: true } });
   }
-  events.push({ type: 'export_group_received', time_ms: 13500, actor_net_guid: 1001, export_group_path: '/Script/ShooterGame.DamageableComponent:MulticastNotifyDamage_Point', payload: { DamagerPlayerState: 400, Character: 1001, RegionalDamage: 'regional_damage_normal', DamageDealt: 150, DamageKilledTarget: true } });
+  // 사망은 킬 RPC 만 (데미지 기록 없이)
+  events.push({ type: 'rpc_received', time_ms: 13500, actor_net_guid: 4001, function_export_path: '/Script/ShooterGame.ShooterCharacter:MulticastNotifyKilledEnemy', payload: { KillerCharacter: 4001, KilledCharacter: 1001 } });
+  // 적 400 이 나에게 준 데미지 (팀 추정용)
+  events.push({ type: 'rpc_received', time_ms: 13400, actor_net_guid: 1001, function_export_path: '/Script/ShooterGame.DamageableComponent:MulticastNotifyDamage_Point', payload: { DamagerPlayerState: 400, RegionalDamage: 'regional_damage_normal', DamageDealt: 40 } });
   const toText = (arr) => arr.map((o) => JSON.stringify(o)).join('\n');
   return { events: toText(events), movement: toText(movement) };
 }
