@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>발로 에임 트레이너</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <!-- 인게임 HUD -->
+  <div id="hud" hidden>
+    <div id="crosshair">
+      <i class="l t"></i><i class="l b"></i><i class="l le"></i><i class="l r"></i><i class="dot"></i>
+    </div>
+    <div class="hud-top">
+      <div id="hudTitle"></div>
+      <div id="hudMain"></div>
+      <div id="hudInfo"></div>
+    </div>
+    <div id="compass">0°</div>
+    <div id="speedBox">
+      <div id="speedText">0.00 m/s</div>
+      <div class="speed-bar"><div id="speedFill"></div><div id="speedMark"></div></div>
+      <div id="speedState">정지 · 정확</div>
+    </div>
+    <div id="feedback"></div>
+    <div id="flash"></div>
+    <div id="fps"></div>
+  </div>
+
+  <!-- 시작 대기 / 일시정지 -->
+  <div id="clickStart" class="overlay small" hidden>
+    <div class="card">
+      <h2 id="csTitle">클릭해서 시작</h2>
+      <p id="csDesc"></p>
+      <p class="muted">WASD 이동 · Shift 걷기 · 좌클릭 사격 · ESC 일시정지</p>
+      <button id="csGo" class="primary">클릭해서 시작</button>
+    </div>
+  </div>
+
+  <div id="pause" class="overlay small" hidden>
+    <div class="card">
+      <h2>일시정지</h2>
+      <div class="row gap">
+        <button id="pResume" class="primary">계속</button>
+        <button id="pRestart">다시 시작</button>
+        <button id="pFinish">종료하고 결과 보기</button>
+        <button id="pMenu">메뉴로</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 메인 메뉴 -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <header>
+        <h1>발로 에임 트레이너</h1>
+        <p class="muted">발로란트 감도·FOV·이동속도를 그대로 옮긴 에임 트레이너 · 교정 조언 · 감도 추천</p>
+      </header>
+      <nav class="tabs">
+        <button data-tab="train" class="active">훈련</button>
+        <button data-tab="sens">감도</button>
+        <button data-tab="history">기록</button>
+        <button data-tab="help">도움말</button>
+      </nav>
+
+      <section id="tab-train" class="tab active">
+        <div id="modes" class="modes"></div>
+        <h3>훈련 설정</h3>
+        <div class="grid form">
+          <label>무기
+            <select id="weapon"></select>
+          </label>
+          <label>적 반응 속도
+            <select id="difficulty"></select>
+          </label>
+          <label>거리 (스트레이프·앵글 홀드)
+            <select id="distance">
+              <option value="10">10m</option>
+              <option value="15">15m</option>
+              <option value="20">20m</option>
+              <option value="30">30m</option>
+              <option value="random">랜덤</option>
+            </select>
+          </label>
+          <label>스트레이프 스타일
+            <select id="strafeProfile"></select>
+          </label>
+          <label>스트레이프 시간 (초)
+            <input id="duration" type="number" min="15" max="300" step="15" />
+          </label>
+          <label>피킹 라운드 수
+            <input id="rounds" type="number" min="5" max="100" step="5" />
+          </label>
+          <label>플릭 타겟 수
+            <input id="flickTargets" type="number" min="10" max="100" step="5" />
+          </label>
+          <label>효과음 볼륨
+            <input id="volume" type="range" min="0" max="1" step="0.05" />
+          </label>
+        </div>
+        <h3>크로스헤어</h3>
+        <div class="grid form">
+          <label>색상 <input id="crossColor" type="color" /></label>
+          <label>선 길이 <input id="crossSize" type="range" min="0" max="16" step="1" /></label>
+          <label>간격 <input id="crossGap" type="range" min="0" max="12" step="1" /></label>
+          <label class="check"><input id="crossDot" type="checkbox" /> 중앙 점</label>
+        </div>
+      </section>
+
+      <section id="tab-sens" class="tab">
+        <div class="grid form">
+          <label>발로란트 인게임 감도
+            <input id="sens" type="number" min="0.01" max="10" step="0.001" />
+          </label>
+          <label>마우스 DPI
+            <input id="dpi" type="number" min="100" max="32000" step="50" />
+          </label>
+          <label>수직 감도 배율 (인게임 설정)
+            <input id="vertMult" type="number" min="0.1" max="3" step="0.01" />
+          </label>
+          <label class="check"><input id="rawInput" type="checkbox" /> 원시 입력 (브라우저 가속/Windows 감도 무시)</label>
+        </div>
+        <div class="stats" id="sensStats"></div>
+        <p id="edpiDesc" class="note"></p>
+
+        <details>
+          <summary>감도 보정 계수 (고급)</summary>
+          <p class="muted">원시 입력을 지원하지 않는 브라우저에서는 Windows 포인터 속도(6/11 권장, 포인터 정확도 향상 끄기)가 적용됩니다.
+            인게임과 같은 거리로 마우스를 밀었을 때 나침반 각도가 다르면 이 값을 조정하세요.</p>
+          <label>보정 계수 <input id="calib" type="number" min="0.1" max="5" step="0.01" /></label>
+        </details>
+
+        <h3>다른 게임 감도 변환</h3>
+        <div class="grid form">
+          <label>게임 <select id="convGame"></select></label>
+          <label>그 게임 감도 <input id="convSens" type="number" step="0.001" value="1.0" /></label>
+          <div class="conv-out">발로란트 감도 <b id="convOut">-</b> <button id="convApply">적용</button></div>
+        </div>
+        <h3>cm/360 으로 감도 계산</h3>
+        <div class="grid form">
+          <label>원하는 cm/360 <input id="cmIn" type="number" step="0.5" value="45" /></label>
+          <div class="conv-out">발로란트 감도 <b id="cmOut">-</b> <button id="cmApply">적용</button></div>
+        </div>
+      </section>
+
+      <section id="tab-history" class="tab">
+        <div id="historyList"></div>
+        <button id="clearHistory">기록 지우기</button>
+      </section>
+
+      <section id="tab-help" class="tab help">
+        <h3>인게임과 똑같이 맞추기</h3>
+        <ul>
+          <li><b>감도</b>: 발로란트는 감도 1.0에서 마우스 1카운트당 0.07° 회전합니다. 여기서도 같은 공식을 씁니다. 인게임 감도와 DPI만 똑같이 입력하세요.</li>
+          <li><b>FOV</b>: 발로란트와 같은 수평 103°로 고정됩니다 (16:9 기준).</li>
+          <li><b>원시 입력</b>: Chrome/Edge에서는 포인터 락의 원시 입력을 사용해 Windows 감도·가속이 적용되지 않습니다. 지원하지 않으면 Windows 포인터 속도 6/11, "포인터 정확도 향상" 끄기가 필요합니다.</li>
+          <li><b>검증</b>: 상단 나침반 각도로 확인할 수 있습니다. 인게임에서 마우스를 N cm 밀어 180° 돌았다면 여기서도 같은 거리에 180°가 나와야 합니다.</li>
+          <li><b>이동</b>: 칼 6.75 m/s 기준, 라이플 80% (5.4 m/s), 걷기 56%. 최고 속도의 30% 이하일 때만 첫 발이 정확합니다 (HUD 속도 바의 표시선).</li>
+          <li><b>카운터 스트레이프</b>: 반대 방향 키를 누르면 감속이 합쳐져 약 55ms 만에 정확도 구간에 들어갑니다. 키만 떼면 약 100ms.</li>
+          <li><b>히트박스</b>: 머리 1발(Vandal 160, Phantom 156), 방어구 포함 150HP 기준.</li>
+        </ul>
+        <h3>모드 설명</h3>
+        <ul>
+          <li><b>스트레이프 봇</b>: 봇이 발로란트 가감속 그대로 ADAD. 빗나간 샷이 적 이동 방향의 뒤인지 앞인지 분석합니다.</li>
+          <li><b>코너 피킹</b>: 벽 뒤에서 오른쪽(D)으로 피킹. 적은 5개의 자주 서는 자리 중 하나에서 앵글을 잡고, 나를 본 뒤 반응 속도가 지나면 쏩니다. 프리에임·이동 중 사격을 분석합니다.</li>
+          <li><b>앵글 홀드</b>: 적이 와이드 스윙, 타이트 피크, 숄더 피크(미끼 후 피크), 가로지르기로 나옵니다. 적은 멈춘 뒤 반응 속도가 지나면 쏩니다.</li>
+          <li><b>플릭</b>: 머리만 맞혀야 사라지는 타겟. 오버슈팅/언더슈팅/미세 보정 횟수를 분석합니다.</li>
+          <li><b>감도 찾기</b>: 현재 감도 ×0.8 ~ ×1.25 다섯 단계를 순서를 숨긴 채 테스트하고 점수 곡선으로 추천 감도를 계산합니다.</li>
+        </ul>
+        <p class="muted">수치는 커뮤니티/위키 기준이며 js/config.js 에서 바꿀 수 있습니다.</p>
+      </section>
+    </div>
+  </div>
+
+  <!-- 결과 -->
+  <div id="results" class="overlay" hidden>
+    <div class="panel">
+      <header>
+        <h1 id="resTitle">결과</h1>
+        <p id="resSub" class="muted"></p>
+      </header>
+      <div id="resStats" class="stats"></div>
+      <div id="resRec"></div>
+      <div id="resExtra"></div>
+      <h3>조언</h3>
+      <div id="resAdvice" class="advice"></div>
+      <div class="row gap">
+        <button id="resAgain" class="primary">다시 하기</button>
+        <button id="resMenu">메뉴로</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

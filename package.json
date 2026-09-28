@@ -1,0 +1,12 @@
+{
+  "name": "valo-aim-trainer",
+  "version": "0.1.0",
+  "description": "발로란트 감도·FOV·이동속도를 그대로 옮긴 브라우저 에임 트레이너 (교정 조언, 감도 추천)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
