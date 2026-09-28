@@ -1,0 +1,46 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main, claude/valorant-aim-trainer-k55kym]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:win
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ValoAimTrainer-win-x64
+          path: desktop/out/ValoAimTrainer-win32-x64
+
+      - name: Publish release (다운로드 페이지)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v0.1.0-build${{ github.run_number }}
+          name: 발로 에임 트레이너 (Windows) build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            **ValoAimTrainer-win-x64.zip** 을 내려받아 압축을 풀고 `ValoAimTrainer.exe` 를 실행하세요.
+            처음 실행 시 Windows 보호 창이 뜨면 "추가 정보 → 실행" 을 누르면 됩니다.
+
+            설치 없이 브라우저로 하려면 **valo-aim-trainer.html** 을 내려받아 더블클릭하세요.
+          files: |
+            desktop/out/ValoAimTrainer-win-x64.zip
+            dist/valo-aim-trainer.html
