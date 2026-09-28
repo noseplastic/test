@@ -5,6 +5,8 @@ import { STRAFE_PROFILES, STRAFE_STOPS } from './bots.js';
 import { cm360, edpi, degPerCount, convertSens, sensFromCm360, describeEdpi, roundSens } from './sens.js';
 import { buildCoachCard } from './coach.js';
 import { validateResult } from './match/validate.js';
+import { readCompact, fileChunks, buildReplayModel, analyzeReplay, guessMe } from './match/replay.js';
+import { flickClass } from './match/engine.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -210,6 +212,7 @@ function initMenu() {
     document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${b.dataset.tab}`));
     if (b.dataset.tab === 'history') renderHistory();
+    if (b.dataset.tab === 'replay') refreshReplayList();
   }));
 
   const updateConv = () => {
@@ -455,6 +458,165 @@ function saveSession() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// ─── 실전 리플레이 ───
+let replayModel = null;
+let replayName = '';
+
+const setReplayStatus = (text) => { $('replayStatus').textContent = text; };
+
+async function loadReplay(eventsChunks, movementChunks, name) {
+  $('replayResult').innerHTML = '';
+  show('replayPlayerRow', false);
+  replayName = name;
+  try {
+    setReplayStatus('이벤트 읽는 중…');
+    const events = await readCompact(eventsChunks);
+    setReplayStatus('이동 기록 읽는 중… (큰 파일은 시간이 걸립니다)');
+    const movement = await readCompact(movementChunks, (n) => setReplayStatus(`이동 기록 읽는 중… ${Math.round(n / 1000)}k 줄`));
+    replayModel = buildReplayModel(events, movement);
+  } catch (err) {
+    setReplayStatus(`읽기 실패: ${err.message || err}`);
+    return;
+  }
+  const m = replayModel;
+  if (!m.players.size || !m.shots.length) {
+    setReplayStatus('플레이어나 발사 기록을 찾지 못했습니다. 파서 버전이 이 리플레이의 패치를 지원하는지 확인하세요.');
+    return;
+  }
+  const shotCount = (ps) => m.shots.filter((x) => x.ps === ps).length;
+  const saved = store.get('vat.replaySubject', null);
+  const players = [...m.players.values()].sort((a, b) => shotCount(b.ps) - shotCount(a.ps));
+  const me = players.find((p) => saved && p.subject === saved)?.ps ?? guessMe(m) ?? players[0].ps;
+  $('replayMe').innerHTML = players.map((p) => `<option value="${p.ps}" ${p.ps === me ? 'selected' : ''}>${escapeHtml(p.agent || '요원 미상')} · ${escapeHtml((p.subject || String(p.ps)).slice(0, 8))} · 발사 ${shotCount(p.ps)}</option>`).join('');
+  show('replayPlayerRow');
+  setReplayStatus(`${name} · 플레이어 ${m.players.size}명 · 발사 ${m.shots.length} · 명중 기록 ${m.damage.length}`);
+  runReplayAnalysis();
+}
+
+function runReplayAnalysis() {
+  if (!replayModel) return;
+  const me = Number($('replayMe').value);
+  const subject = replayModel.players.get(me)?.subject;
+  if (subject) store.set('vat.replaySubject', subject);
+  const res = analyzeReplay(replayModel, me);
+  renderReplay(res);
+  if (res.engagements.length) {
+    coachSessions.unshift({ modeName: '실전 리플레이', date: Date.now(), advice: res.advice.map(({ level, title, key }) => ({ level, title, key })) });
+    coachSessions = coachSessions.slice(0, 5);
+    store.set('vat.coachSessions', coachSessions);
+    pushCoach();
+  }
+}
+
+function renderReplay(res) {
+  const st = res.stats;
+  const d = res.diagnostics;
+  const name = (ps) => escapeHtml(replayModel.players.get(ps)?.agent || String(ps));
+  const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  const tiles = [
+    ['교전', `${st.engagements}`],
+    ['킬 / 데스', `${st.kills} / ${st.deaths}`],
+    ['명중률 (실제)', pct(st.accuracy)],
+    ['헤드샷 비율 (실제)', pct(st.headshotRate)],
+    ['이동 중 사격', pct(st.movingShotRate)],
+    ['조준 이동 중 사격', pct(st.aimMovingShotRate)],
+    ['반응 시작 때 상하 오차', Number.isFinite(st.placementPitch) ? `${fmt(st.placementPitch, 1)}°` : '-'],
+    ['반응 시작 때 좌우 오차', Number.isFinite(st.placementYaw) ? `${fmt(st.placementYaw, 1)}°` : '-'],
+    ['조준 시간 (반응→첫 발)', Number.isFinite(st.aimTimeMs) ? `${Math.round(st.aimTimeMs)}ms` : '-'],
+    ['오버 / 언더슈팅', `${pct(st.overshootRate)} / ${pct(st.undershootRate)}`],
+    ['트래킹 뒤처짐', pct(st.lagRate)],
+    ['죽을 때 적과의 각도 (중앙값)', Number.isFinite(st.deathAimErrDeg) ? `${fmt(st.deathAimErrDeg, 0)}°` : '-'],
+  ].filter(([, v]) => v !== '-' && v !== '- / -');
+  const rows = res.engagements.map((e) => {
+    const shots = e.shots.length;
+    const hits = e.shots.filter((x) => x.part).length;
+    const heads = e.shots.filter((x) => x.part === 'head').length;
+    const fl = e.noShot ? null : flickClass(e);
+    const result = e.result === 'kill' ? '킬' : e.result === 'death' ? (e.noShot ? '사망 (못 쏨)' : '사망') : '-';
+    const place = `${fmt(Math.abs(e.placement.ex), 1)}° / ${fmt(Math.abs(e.placement.ey), 1)}°`;
+    return `<tr><td>${mmss(e.appearT)}</td><td>${name(e.target)}</td><td>${result}</td><td>${place}</td>
+      <td>${Number.isFinite(e.firstShotT) ? Math.round((e.firstShotT - e.appearT) * 1000) + 'ms' : '-'}</td>
+      <td>${shots ? `${hits}/${shots} (헤드 ${heads})` : '-'}</td><td>${shots ? e.shots.filter((x) => x.moving).length : '-'}</td>
+      <td>${fl === 'over' ? '오버' : fl === 'under' ? '언더' : fl === 'clean' ? '정확' : '-'}</td>
+      <td>${e.deathErr ? fmt(Math.hypot(e.deathErr.ex, e.deathErr.ey), 0) + '°' : ''}</td></tr>`;
+  }).join('');
+  const cal = d.calibration;
+  $('replayResult').innerHTML = `
+    <div class="stats">${tiles.map(([k, v]) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`).join('')}</div>
+    <h3>조언</h3>
+    <div class="advice">${res.advice.length ? res.advice.map((a) => `<div class="adv ${a.level}"><b>${escapeHtml(a.title)}</b><p>${escapeHtml(a.text)}</p></div>`).join('') : '<p class="muted">교전 기록이 부족합니다.</p>'}</div>
+    <h3>교전별</h3>
+    <p class="muted">"반응 시작 오차"는 적을 향해 크로스헤어를 움직이기 시작한 순간 머리까지의 좌우/상하 각도입니다 (적이 처음 보인 순간은 맵 벽 정보가 없어 알 수 없음).</p>
+    <table><tr><th>시각</th><th>상대</th><th>결과</th><th>반응 시작 오차 (좌우/상하)</th><th>조준 시간</th><th>명중/발사</th><th>이동 중 사격</th><th>플릭</th><th>죽을 때 각도</th></tr>${rows}</table>
+    <details class="engine-check"><summary>데이터 진단</summary>
+      <ul class="engine-per">
+        <li>내 이동·시야 기록 ${d.myMoveSamples}개 · 평균 간격 ${Number.isFinite(d.moveIntervalMs) ? d.moveIntervalMs + 'ms' : '-'} (간격이 크면 플릭 분석이 부정확)</li>
+        <li>내 발사 ${d.myShots}발 · 적으로 본 플레이어 ${d.enemies.map(name).join(', ')}</li>
+        <li>좌표 보정: ${cal ? `헤드 명중 ${cal.samples}발 기준 오차 ${fmt(cal.err, 2)}° · 머리 높이 +${cal.headZ}cm` : '헤드 명중이 3발 미만이라 기본값 사용'}</li>
+        <li>시야 규칙: ${Number.isFinite(d.viewConvention.err) ? `이동 기록 ↔ 발사 조준 방향 오차 ${fmt(d.viewConvention.err, 2)}° (${d.viewConvention.samples}발)` : '확인 불가'} · 눈 높이 ${Number.isFinite(d.eyeZ) ? `+${fmt(d.eyeZ, 0)}cm` : '-'}</li>
+      </ul>
+      <p class="muted">좌표 보정 오차나 시야 규칙 오차가 1° 를 넘으면 이 리플레이의 데이터 해석이 맞지 않을 수 있습니다. 이 값을 알려주시면 개선에 도움이 됩니다.</p>
+    </details>`;
+}
+
+async function refreshReplayList() {
+  const desk = window.vatDesktop;
+  if (!desk?.listReplays) return;
+  const list = await desk.listReplays();
+  if (list.error) { $('replayList').innerHTML = `<p class="muted">${escapeHtml(list.error)}</p>`; return; }
+  $('replayList').innerHTML = list.files.length
+    ? `<table><tr><th>파일</th><th>날짜</th><th>크기</th><th></th></tr>${list.files.map((f, i) => `<tr><td>${escapeHtml(f.name)}</td>
+      <td>${new Date(f.mtime).toLocaleString()}</td><td>${Math.round(f.size / 1e6)}MB</td><td><button data-replay="${i}">분석</button></td></tr>`).join('')}</table>`
+    : '<p class="muted">리플레이가 없습니다.</p>';
+  $('replayList').onclick = (e) => {
+    const b = e.target.closest('[data-replay]');
+    if (b) analyzeVrf(list.files[Number(b.dataset.replay)].path);
+  };
+}
+
+async function analyzeVrf(path) {
+  const desk = window.vatDesktop;
+  setReplayStatus('리플레이 해석 중… (1~2분 걸릴 수 있습니다)');
+  $('replayResult').innerHTML = '';
+  const out = await desk.exportReplay(path);
+  if (out.error) { setReplayStatus(`해석 실패: ${out.error}`); return; }
+  await loadReplay(desktopFileChunks(out.events), desktopFileChunks(out.movement), out.name);
+}
+
+// 데스크톱 앱: 메인 프로세스에서 파일을 4MB 씩 받아 문자열로
+async function* desktopFileChunks(path) {
+  const dec = new TextDecoder();
+  let offset = 0;
+  for (;;) {
+    const { bytes, eof } = await window.vatDesktop.readFileSlice(path, offset, 4 << 20);
+    offset += bytes.length;
+    const text = dec.decode(bytes, { stream: !eof });
+    if (text) yield text;
+    if (eof) break;
+  }
+}
+
+function initReplay() {
+  const desk = window.vatDesktop;
+  if (desk?.listReplays) {
+    show('replayDesktop');
+    show('replayBrowser', false);
+    $('replayRefresh').addEventListener('click', refreshReplayList);
+    $('replayPick').addEventListener('click', async () => {
+      const path = await desk.pickReplay();
+      if (path) analyzeVrf(path);
+    });
+  }
+  $('replayFiles').addEventListener('change', () => {
+    const files = [...$('replayFiles').files];
+    const ev = files.find((f) => /events/i.test(f.name));
+    const mv = files.find((f) => /movement/i.test(f.name));
+    if (!ev || !mv) { setReplayStatus('events.ndjson 과 movement.ndjson 두 파일을 함께 선택하세요.'); return; }
+    loadReplay(fileChunks(ev), fileChunks(mv), ev.name.replace(/events.*$/i, '') || '리플레이');
+  });
+  $('replayMe').addEventListener('change', runReplayAnalysis);
+}
+
 function renderHistory() {
   if (!history.length) {
     $('historyList').innerHTML = '<p class="muted">아직 기록이 없습니다.</p>';
@@ -472,4 +634,5 @@ function renderHistory() {
 }
 
 initMenu();
+initReplay();
 window.__app = { game, settings, startMode, get lastResult() { return lastResult; } };

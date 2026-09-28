@@ -2,3 +2,4 @@ node_modules/
 .DS_Store
 desktop/app/
 desktop/out/
+desktop/parser/

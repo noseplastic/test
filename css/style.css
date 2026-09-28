@@ -162,3 +162,6 @@ th { color: var(--muted); font-weight: 500; }
 .engine-check { margin: 16px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
 .engine-check summary { cursor: pointer; font-weight: 700; }
 .engine-table td small.diff { color: var(--muted); }
+.file-pick { display: inline-flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.engine-per { margin: 6px 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+code { background: #0d1218; padding: 1px 5px; border-radius: 4px; }

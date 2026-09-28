@@ -1,7 +1,8 @@
 // 데스크톱 실행파일용 Electron 진입점.
 // - 트레이너 창: dist/valo-aim-trainer.html
 // - 오버레이 창: dist/overlay.html (항상 위, 클릭 통과). 게임 화면·메모리·입력은 읽지 않고 코치 카드만 표시한다.
-const { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, ipcMain, screen, dialog } = require('electron');
+const { execFile } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 
@@ -255,6 +256,90 @@ ipcMain.on('overlay:size', (e, w, h) => {
     const [x, y] = overlay.getPosition();
     overlay.setBounds({ x, y, width: nw, height: nh });
   } else overlay.setBounds(overlayBounds());
+});
+
+// ─── 리플레이 (.vrf) 해석 ───
+// ValorantReplayParser 의 CliReader.exe (CI 에서 빌드해 resources/parser 에 포함) 로 NDJSON 을 만든다.
+// 게임이 저장한 리플레이 파일만 읽고, 게임 실행 중인 프로세스에는 접근하지 않는다.
+const exportedFiles = new Set();
+
+function demosDir() {
+  return path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'VALORANT', 'Saved', 'Demos');
+}
+
+function parserPath() {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'parser', 'CliReader.exe'),
+    path.join(__dirname, 'parser', 'CliReader.exe'),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+ipcMain.handle('replay:list', async () => {
+  const dir = demosDir();
+  try {
+    const names = (await fs.promises.readdir(dir)).filter((n) => n.toLowerCase().endsWith('.vrf'));
+    const files = await Promise.all(names.map(async (name) => {
+      const st = await fs.promises.stat(path.join(dir, name));
+      return { name, path: path.join(dir, name), size: st.size, mtime: st.mtimeMs };
+    }));
+    files.sort((a, b) => b.mtime - a.mtime);
+    return { dir, files };
+  } catch {
+    return { dir, files: [], error: `리플레이 폴더가 없습니다: ${dir}` };
+  }
+});
+
+ipcMain.handle('replay:pick', async () => {
+  const r = await dialog.showOpenDialog(trainer, {
+    title: '발로란트 리플레이 선택',
+    defaultPath: demosDir(),
+    filters: [{ name: 'VALORANT replay', extensions: ['vrf'] }],
+    properties: ['openFile'],
+  });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle('replay:export', async (_e, vrfPath) => {
+  if (typeof vrfPath !== 'string' || !vrfPath.toLowerCase().endsWith('.vrf') || !fs.existsSync(vrfPath)) {
+    return { error: '리플레이 파일을 찾을 수 없습니다.' };
+  }
+  const exe = parserPath();
+  if (!exe) return { error: '리플레이 해석기(CliReader.exe)가 앱에 포함되어 있지 않습니다.' };
+  const st = fs.statSync(vrfPath);
+  const base = path.basename(vrfPath, path.extname(vrfPath)).replace(/[^\w.-]/g, '_');
+  const out = path.join(app.getPath('userData'), 'replays', `${base}-${Math.round(st.mtimeMs)}`);
+  const events = path.join(out, 'events.ndjson');
+  const movement = path.join(out, 'movement.ndjson');
+  if (!(fs.existsSync(events) && fs.existsSync(movement))) {
+    await fs.promises.mkdir(out, { recursive: true });
+    const res = await new Promise((resolve) => {
+      execFile(exe, ['export', vrfPath, '-o', out], { timeout: 10 * 60 * 1000, maxBuffer: 64 << 20, windowsHide: true },
+        (err, stdout, stderr) => resolve({ err, stdout, stderr }));
+    });
+    if (res.err || !fs.existsSync(events) || !fs.existsSync(movement)) {
+      const msg = String(res.stderr || res.stdout || res.err?.message || '').trim().split('\n').slice(-5).join(' ');
+      return { error: `해석기 오류 (패치 버전이 지원되지 않을 수 있음): ${msg}` };
+    }
+  }
+  exportedFiles.add(events);
+  exportedFiles.add(movement);
+  return { name: path.basename(vrfPath), events, movement };
+});
+
+// 해석 결과 파일만 조각으로 읽을 수 있다
+ipcMain.handle('replay:read', async (_e, file, offset, length) => {
+  if (!exportedFiles.has(file)) throw new Error('허용되지 않은 파일');
+  const fh = await fs.promises.open(file, 'r');
+  try {
+    const size = (await fh.stat()).size;
+    const len = Math.max(0, Math.min(Number(length) || 0, 16 << 20, size - offset));
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, offset);
+    return { bytes: new Uint8Array(buf.buffer, buf.byteOffset, len), eof: offset + len >= size };
+  } finally {
+    await fh.close();
+  }
 });
 
 app.on('second-instance', showTrainer);

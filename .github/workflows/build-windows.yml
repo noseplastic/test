@@ -2,11 +2,15 @@ name: Build Windows app
 
 on:
   push:
-    branches: [main, claude/valorant-aim-trainer-k55kym]
+    branches: [main, claude/valorant-aim-trainer-k55kym, claude/valorant-aim-overlay-yen0za]
   workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  # 파서는 패치마다 바뀔 수 있어 검증한 커밋으로 고정
+  PARSER_COMMIT: 8b7afcbb98bc4f8d4c342aef8242b142568624ca
 
 jobs:
   build:
@@ -21,6 +25,24 @@ jobs:
 
       - run: npm ci
       - run: npm test
+
+      # 리플레이 해석기: ValorantReplayParser (MIT) 의 CliReader 를 Windows 단일 실행파일로 빌드
+      - name: Checkout ValorantReplayParser
+        run: |
+          git clone https://github.com/michel-giehl/ValorantReplayParser parser-src
+          git -C parser-src checkout ${{ env.PARSER_COMMIT }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: parser-src/global.json
+
+      - name: Build replay parser (win-x64)
+        run: |
+          dotnet publish parser-src/src/CliReader/CliReader.csproj -c Release -r win-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o desktop/parser
+          cp parser-src/LICENSE desktop/parser/LICENSE-ValorantReplayParser.txt
+          ls -la desktop/parser
+
       - run: npm run build:win
 
       - name: Upload build artifact
