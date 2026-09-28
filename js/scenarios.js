@@ -115,6 +115,7 @@ class Scenario {
       },
       stats,
       advice,
+      engagements: this.engagements,
       ...extra,
     };
   }
@@ -621,6 +622,7 @@ export class FlickScenario extends Scenario {
     this.recordShot(shot, this.bot);
     if (shot.bot !== this.bot) return;
     if (shot.part === 'head') {
+      this.game.rec?.events.push({ t: this.game.recT(), type: 'kill' });
       this.bot.alive = false;
       this.bot.setVisible(false);
       this.game.sfx.head();

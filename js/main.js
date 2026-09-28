@@ -4,6 +4,7 @@ import { WEAPONS, DIFFICULTY, GAME_YAW } from './config.js';
 import { STRAFE_PROFILES, STRAFE_STOPS } from './bots.js';
 import { cm360, edpi, degPerCount, convertSens, sensFromCm360, describeEdpi, roundSens } from './sens.js';
 import { buildCoachCard } from './coach.js';
+import { validateResult } from './match/validate.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -230,6 +231,8 @@ function initMenu() {
   $('convApply').addEventListener('click', () => applySens('convOut'));
   $('cmApply').addEventListener('click', () => applySens('cmOut'));
 
+  $('resEngine').addEventListener('toggle', () => { if ($('resEngine').open) renderEngineCheck(); });
+  $('resEngineSave').addEventListener('click', saveSession);
   $('csGo').addEventListener('click', requestResume);
   $('pResume').addEventListener('click', requestResume);
   $('pRestart').addEventListener('click', () => startMode(currentMode));
@@ -373,6 +376,10 @@ function showResult(res) {
     $('resExtra').innerHTML = '';
   }
 
+  $('resEngine').open = false;
+  $('resEngine').hidden = !res.session;
+  $('resEngineBody').innerHTML = '';
+
   $('resAdvice').innerHTML = res.advice.length
     ? res.advice.map((a) => `<div class="adv ${a.level}"><b>${escapeHtml(a.title)}</b><p>${escapeHtml(a.text)}</p></div>`).join('')
     : '<p class="muted">데이터가 부족합니다. 조금 더 길게 플레이해보세요.</p>';
@@ -391,6 +398,61 @@ function showResult(res) {
   pushCoach();
 
   show('results');
+}
+
+// ─── 실전 분석 엔진 검증 ───
+function fmtStat(row, v) {
+  if (!Number.isFinite(v)) return '-';
+  if (row.scale === 100) return `${Math.round(v * 100)}%`;
+  return row.key === 'reactionMs' ? `${Math.round(v)}` : Number.isInteger(v) ? `${v}` : v.toFixed(2);
+}
+
+function fmtDiff(row) {
+  if (!Number.isFinite(row.diff)) return '';
+  const d = row.diff;
+  const unit = row.scale === 100 ? '%p' : row.key === 'reactionMs' ? 'ms' : row.key.startsWith('placement') ? '°' : '';
+  const txt = `${d >= 0 ? '+' : ''}${row.key === 'reactionMs' || row.scale === 100 ? Math.round(d) : d.toFixed(2)}${unit}`;
+  return ` <small class="diff">(${txt})</small>`;
+}
+
+function renderEngineCheck() {
+  if (!lastResult?.session || $('resEngineBody').innerHTML) return;
+  const v = validateResult(lastResult);
+  if (!v) return;
+  const head = `<tr><th>항목</th><th>트레이너 정답</th>${v.runs.map((r) => `<th>${escapeHtml(r.name)}</th>`).join('')}</tr>`;
+  const rows = v.runs[0].rows.map((row, i) => {
+    if (!Number.isFinite(row.truth) && v.runs.every((r) => !Number.isFinite(r.rows[i].est))) return '';
+    return `<tr><td>${escapeHtml(row.label)}</td><td>${fmtStat(row, row.truth)}</td>${
+      v.runs.map((r) => `<td>${fmtStat(r.rows[i], r.rows[i].est)}${fmtDiff(r.rows[i])}</td>`).join('')}</tr>`;
+  }).join('');
+  const est = v.runs[0].est.stats;
+  const extra = [
+    Number.isFinite(est.aimMovingShotRate) ? `조준 이동 중 사격 ${pct(est.aimMovingShotRate)}` : '',
+    Number.isFinite(est.jitterDeg) ? `각 잡을 때 떨림 ${est.jitterDeg.toFixed(2)}°` : '',
+    Number.isFinite(est.pitchDriftDegPerSec) ? `이동 중 시야 흐름 ${est.pitchDriftDegPerSec.toFixed(2)}°/s` : '',
+  ].filter(Boolean).join(' · ');
+  const per = v.runs.filter((r) => r.per).map((r) => {
+    const p = r.per;
+    const parts = [`교전 ${p.matched}/${p.truthCount} 찾음`];
+    if (Number.isFinite(p.reactionErrMs)) parts.push(`반응 오차 ${Math.round(p.reactionErrMs)}ms`);
+    if (Number.isFinite(p.placementErrDeg)) parts.push(`배치 오차 ${p.placementErrDeg.toFixed(2)}°`);
+    if (p.flickPairs) parts.push(`오버/언더 판정 일치 ${pct(p.flickAgree)} (${p.flickPairs}개)`);
+    parts.push(`녹화 지연 추정 ${r.est.stats.frameLagMs}ms (실제 30ms)`);
+    return `<li><b>${escapeHtml(r.name)}</b>: ${escapeHtml(parts.join(' · '))}</li>`;
+  }).join('');
+  $('resEngineBody').innerHTML = `<table class="engine-table">${head}${rows}</table>
+    ${per ? `<p class="muted">교전별 비교 (중앙값)</p><ul class="engine-per">${per}</ul>` : ''}
+    ${extra ? `<p class="muted">입력 기록 전용 분석 (정답 없음): ${escapeHtml(extra)}</p>` : ''}`;
+}
+
+function saveSession() {
+  if (!lastResult?.session) return;
+  const blob = new Blob([JSON.stringify(lastResult.session)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `session-${lastResult.mode}-${new Date(lastResult.date).toISOString().replace(/[:.]/g, '-')}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 function renderHistory() {

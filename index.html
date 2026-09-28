@@ -200,6 +200,13 @@
       <div id="resExtra"></div>
       <h3>조언</h3>
       <div id="resAdvice" class="advice"></div>
+      <details id="resEngine" class="engine-check">
+        <summary>실전 분석 엔진 검증 (트레이너 정답 vs 입력 기록 + 영상 인식 추정)</summary>
+        <p class="muted">방금 플레이를 녹화 영상처럼 60fps 로 바꾸고, 적 머리 위치에 인식 오차를 넣은 뒤 실전용 분석 엔진으로 다시 분석한 결과입니다.
+          발사 시각은 클릭으로 추정합니다. 정답과 차이가 작을수록 실전 분석을 믿을 수 있습니다.</p>
+        <div id="resEngineBody"></div>
+        <button id="resEngineSave">세션 기록 저장 (JSON)</button>
+      </details>
       <div class="row gap">
         <button id="resAgain" class="primary">다시 하기</button>
         <button id="resMenu">메뉴로</button>

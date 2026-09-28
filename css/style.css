@@ -157,3 +157,8 @@ th { color: var(--muted); font-weight: 500; }
   .panel { padding: 18px 16px; }
   header h1 { font-size: 21px; }
 }
+
+/* 실전 분석 엔진 검증 */
+.engine-check { margin: 16px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.engine-check summary { cursor: pointer; font-weight: 700; }
+.engine-table td small.diff { color: var(--muted); }

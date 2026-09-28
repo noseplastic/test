@@ -260,7 +260,8 @@ export class Game {
     };
     this.keys = new Set();
     this.mouseDown = false;
-    this.sensMultiplier = 1;
+    this._sensMult = 1;
+    this.rec = null;
     this.time = 0;
     this.running = false;
     this.paused = false;
@@ -286,6 +287,56 @@ export class Game {
     return WEAPONS[this.settings.weapon] || WEAPONS.vandal;
   }
 
+  get sensMultiplier() {
+    return this._sensMult;
+  }
+
+  set sensMultiplier(v) {
+    if (v !== this._sensMult && this.rec) this.rec.sensChanges.push([this.recT(), this.effectiveSens(v)]);
+    this._sensMult = v;
+  }
+
+  effectiveSens(mult = this._sensMult) {
+    return this.settings.sens * mult * this.settings.calib;
+  }
+
+  // ─── 세션 기록 (실전 분석 엔진 검증용: js/match/engine.js 의 Session 형식) ───
+  recT() {
+    return Math.round(this.now() * 10000) / 10;
+  }
+
+  startRecording() {
+    this.rec = {
+      meta: {
+        sens: this.effectiveSens(1), dpi: this.settings.dpi, vertMult: this.settings.vertMult,
+        hfov: VALORANT.HFOV_DEG, width: window.innerWidth, height: window.innerHeight, weapon: this.settings.weapon,
+      },
+      mouse: [], keys: [], buttons: [], shots: [], frames: [], events: [], resets: [], sensChanges: [],
+    };
+  }
+
+  // 이번 프레임에 보이는 봇 머리의 화면 위치 = 완벽한 적 인식 결과
+  recordFrame() {
+    const rec = this.rec;
+    if (!rec) return;
+    const W = rec.meta.width, H = rec.meta.height;
+    const f = (W / 2) / Math.tan((VALORANT.HFOV_DEG / 2) * DEG);
+    // 카메라 행렬은 렌더링 때만 갱신되므로 투영 전에 직접 갱신 (안 하면 한 프레임 전 시점으로 투영됨)
+    this.camera.updateMatrixWorld();
+    const heads = [];
+    for (const b of this.bots) {
+      if (!this.canSeeBot(b)) continue;
+      const v = b.headPoint().clone().project(this.camera);
+      if (v.z > 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) continue;
+      heads.push({
+        x: Math.round(((v.x + 1) / 2) * W * 10) / 10,
+        y: Math.round(((1 - v.y) / 2) * H * 10) / 10,
+        r: Math.round(f * Math.tan(this.headRadiusDeg(b) * DEG) * 100) / 100,
+      });
+    }
+    rec.frames.push({ t: this.recT(), heads, mouseIdx: rec.mouse.length });
+  }
+
   // 발로란트 수평 FOV 103° 를 유지하도록 수직 FOV 계산
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
@@ -304,19 +355,27 @@ export class Game {
     document.addEventListener('mousedown', (e) => {
       if (!this.running || this.paused || !this.locked) return;
       if (e.button === 0) {
+        this.rec?.buttons.push([this.recT(), 0, 1]);
         this.mouseDown = true;
         this.tryFire();
       }
     });
     document.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
+      if (e.button === 0) {
+        if (this.mouseDown) this.rec?.buttons.push([this.recT(), 0, 0]);
+        this.mouseDown = false;
+      }
     });
     document.addEventListener('keydown', (e) => {
       if (!this.running) return;
+      if (!e.repeat && !this.paused) this.rec?.keys.push([this.recT(), e.code, 1]);
       this.keys.add(e.code);
       if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
     });
-    document.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    document.addEventListener('keyup', (e) => {
+      if (this.keys.has(e.code)) this.rec?.keys.push([this.recT(), e.code, 0]);
+      this.keys.delete(e.code);
+    });
     window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
@@ -357,6 +416,7 @@ export class Game {
     if (performance.now() - this.lockTime < 80) return;
     const mx = e.movementX, my = e.movementY;
     if (Math.abs(mx) > 20000 || Math.abs(my) > 20000) return;
+    this.rec?.mouse.push([this.recT(), mx, my]);
     const k = VALORANT.YAW_DEG_PER_COUNT * this.settings.sens * this.sensMultiplier * this.settings.calib * DEG;
     const p = this.player;
     p.yaw -= mx * k;
@@ -443,6 +503,7 @@ export class Game {
     if (yawDeg !== null) p.yaw = yawDeg * DEG;
     if (pitchDeg !== null) p.pitch = pitchDeg * DEG;
     this.syncCamera();
+    this.rec?.resets.push(this.recT());
   }
 
   syncCamera() {
@@ -551,6 +612,7 @@ export class Game {
     if (hit) this.addDecal(hit.point, !!bot);
     this.sfx.shot();
 
+    this.rec?.shots.push(Math.round(t * 10000) / 10);
     const shot = {
       t, part, bot, speed, spread,
       moving: !isAccurate(speed, w),
@@ -566,6 +628,7 @@ export class Game {
     bot.hp -= this.weapon.damage[idx];
     bot.flash();
     if (bot.hp <= 0) {
+      this.rec?.events.push({ t: this.recT(), type: 'kill' });
       bot.alive = false;
       bot.setVisible(false);
       this.sfx.kill();
@@ -577,6 +640,7 @@ export class Game {
   }
 
   playerDie() {
+    this.rec?.events.push({ t: this.recT(), type: 'death' });
     this.sfx.death();
     this.hooks.onDeath?.();
   }
@@ -609,6 +673,7 @@ export class Game {
     this.mouseDown = false;
     this.stopTracker = new StopTracker();
     this.stopEvents = [];
+    this.startRecording();
     this.clearWorld();
     this.player.bounds = null;
     this.player.canMove = true;
@@ -632,6 +697,8 @@ export class Game {
     this.mouseDown = false;
     if (document.pointerLockElement) document.exitPointerLock();
     const result = this.scenario?.result();
+    if (result) result.session = this.rec;
+    this.rec = null;
     this.hooks.onEnd?.(result);
   }
 
@@ -680,6 +747,7 @@ export class Game {
 
     this.scenario?.update(dt);
     for (const b of this.bots) b.sync();
+    this.recordFrame();
 
     if (this.mouseDown && this.locked) this.tryFire();
 

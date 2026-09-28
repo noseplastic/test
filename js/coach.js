@@ -26,6 +26,9 @@ export const CUES = {
   'first-death': '드라이 피크 금지 · 스킬 먼저 쓰고 피크',
   trade: '팀원과 트레이드 가능한 거리 유지',
   finish: '데미지 준 적은 리셋 후 다시 교전',
+  'aim-moving-shot': '플릭 끝에서 멈추고 쏘기',
+  tremor: '각 잡을 땐 손 힘 빼기',
+  'pitch-drift': '달릴 때도 머리 높이 유지',
 };
 
 // 약점과 상관없이 돌아가며 보여줄 기본 리마인더
